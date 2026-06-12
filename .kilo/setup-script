@@ -1,0 +1,20 @@
+#!/bin/bash
+# Aspen Grove Core setup script for Agent Manager worktrees
+# Runs before agent sessions in managed worktrees
+
+echo "🔧 Aspen Grove Core: Worktree setup initiated"
+echo "WORKTREE_PATH: $WORKTREE_PATH"
+echo "REPO_PATH: $REPO_PATH"
+
+# Copy root environment files
+if [ -f "$REPO_PATH/.env.example" ]; then
+    cp "$REPO_PATH/.env.example" "$WORKTREE_PATH/.env" 2>/dev/null || true
+fi
+
+# Ensure node_modules are linked or installed
+cd "$WORKTREE_PATH"
+if [ -f "package.json" ]; then
+    npm install --silent 2>/dev/null || echo "Dependencies may need manual install"
+fi
+
+echo "✅ Aspen Grove Core: Setup complete"

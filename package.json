@@ -1,13 +1,14 @@
 {
   "name": "pro-code",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "tsc && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "workers": "cd /Users/macarena1/.kiro/workers && ls -la"
   },
   "dependencies": {
     "react": "^19.2.6",
@@ -17,11 +18,30 @@
     "@eslint/js": "^10.0.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.1",
+    "@vitejs/plugin-react": "^4.7.0",
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.6.0",
-    "vite": "^8.0.12"
+    "vite": "^5.4.21"
+  },
+  "memory": {
+    "enabled": true,
+    "path": "/Users/macarena1/.kiro/mem_links",
+    "cache": "/Users/macarena1/.kiro/cache",
+    "sync": {
+      "aspen_grove": "/Users/macarena1/00_STRATEGY_CORE",
+      "gemini": "/Users/macarena1/.gemini"
+    }
+  },
+  "workers": {
+    "enabled": true,
+    "path": "/Users/macarena1/.kiro/workers",
+    "list": [
+      "strategist", "coordinator", "analyst", "creator",
+      "database-crawler", "memory-specialist", "python-executor",
+      "api-manager", "mcp-manager", "photo-analyzer",
+      "video-processor", "case-analyzer", "motion-generator"
+    ]
   }
 }

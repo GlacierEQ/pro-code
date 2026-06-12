@@ -1,0 +1,15 @@
+{
+  "name": "aspen-grove",
+  "type": "dark",
+  "colors": {
+    "primary": "#FF6B35",
+    "secondary": "#4ECDC4",
+    "accent": "#FFE66D",
+    "background": "#0A0A0A",
+    "foreground": "#F5F5F5",
+    "border": "#333333",
+    "success": "#00D26A",
+    "warning": "#FFB400",
+    "error": "#FF3B30"
+  }
+}

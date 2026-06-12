@@ -1,0 +1,50 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  
+  "model": "kilo/poolside/laguna-m.1:free",
+  "small_model": "kilo/poolside/laguna-m.1:free",
+  "default_agent": "code",
+  
+  "permission": {
+    "bash": "allow",
+    "edit": {
+      "src/**": "allow",
+      "package.json": "allow",
+      "*.json": "allow",
+      "*.md": "allow",
+      ".vscode/**": "allow",
+      "!.env*": "deny",
+      "!.kilo/**": "ask",
+      "*": "ask"
+    },
+    "read": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "skill": "allow",
+    "task": "allow",
+    "external_directory": "deny"
+  },
+  
+  "disabled_providers": [],
+  
+  "autoupdate": "notify",
+  "snapshot": true,
+  "share": "manual",
+  
+  "skills": {
+    "paths": ["./custom-skills"],
+    "urls": []
+  },
+  
+  "instructions": [
+    "AGENTS.md",
+    ".kilo/instructions/*.md"
+  ],
+  
+  "plugin": [],
+  
+  "compaction": {
+    "auto": true,
+    "prune": true
+  }
+}
