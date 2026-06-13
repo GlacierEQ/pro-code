@@ -1,14 +1,15 @@
 {
   "name": "pro-code",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "workers": "cd /Users/macarena1/.kiro/workers && ls -la"
+    "workers": "ls -la $HOME/.kiro/workers"
   },
   "dependencies": {
     "react": "^19.2.6",
@@ -23,20 +24,21 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.6.0",
+    "typescript": "^5.8.3",
     "vite": "^5.4.21"
   },
   "memory": {
     "enabled": true,
-    "path": "/Users/macarena1/.kiro/mem_links",
-    "cache": "/Users/macarena1/.kiro/cache",
+    "path": "$HOME/.kiro/mem_links",
+    "cache": "$HOME/.kiro/cache",
     "sync": {
-      "aspen_grove": "/Users/macarena1/00_STRATEGY_CORE",
-      "gemini": "/Users/macarena1/.gemini"
+      "aspen_grove": "$HOME/00_STRATEGY_CORE",
+      "gemini": "$HOME/.gemini"
     }
   },
   "workers": {
     "enabled": true,
-    "path": "/Users/macarena1/.kiro/workers",
+    "path": "$HOME/.kiro/workers",
     "list": [
       "strategist", "coordinator", "analyst", "creator",
       "database-crawler", "memory-specialist", "python-executor",

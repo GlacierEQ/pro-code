@@ -1,0 +1,36 @@
+# Spiral Engine — Go CI Template
+# Reference: https://github.com/GlacierEQ/pro-code/blob/main/ci/go-ci.yml
+name: Go CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ['**.go', 'go.mod', 'go.sum']
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality:
+    name: Vet · Lint · Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+      - name: Test
+        run: go test -race -coverprofile=coverage.out ./...
+
+      - name: Coverage
+        run: go tool cover -func=coverage.out

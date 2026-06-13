@@ -1,6 +1,7 @@
 /**
  * Memory System for Pro-Code
- * Integrates with Aspen Groves, Notion Workers, and comet-agent API
+ * Integrates with Aspen Groves, Notion Workers, and comet-agent API.
+ * Note: localStorage calls are wrapped defensively — sandboxed envs may block them.
  */
 
 export interface MemoryEntry {
@@ -28,26 +29,17 @@ export class MemorySystem {
     category: MemoryEntry['category'] = 'short-term',
     priority: MemoryEntry['priority'] = 'medium',
   ): Promise<void> {
-    const entry: MemoryEntry = {
-      id,
-      content,
-      category,
-      priority,
-      timestamp: new Date().toISOString(),
-    };
+    const entry: MemoryEntry = { id, content, category, priority, timestamp: new Date().toISOString() };
     this.cache.set(id, entry);
     this.persistToStorage();
 
-    // Sync to comet-agent context manager
-    try {
-      await fetch(`${COMET_AGENT_URL}/context/${this.sessionId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: { [id]: entry } }),
-      });
-    } catch {
-      // Comet-agent not available, continue with local storage
-    }
+    // Non-blocking sync to comet-agent context manager
+    fetch(`${COMET_AGENT_URL}/context/${this.sessionId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: { [id]: entry } }),
+      signal: AbortSignal.timeout(3_000),
+    }).catch(() => { /* comet-agent not available — continue with local cache */ });
   }
 
   async get(id: string): Promise<MemoryEntry | undefined> {
@@ -73,36 +65,27 @@ export class MemorySystem {
     this.persistToStorage();
   }
 
-  async getStats(): Promise<{
-    total: number;
-    byCategory: Record<string, number>;
-    byPriority: Record<string, number>;
-  }> {
+  async getStats(): Promise<{ total: number; byCategory: Record<string, number>; byPriority: Record<string, number> }> {
     const entries = Array.from(this.cache.values());
     const byCategory: Record<string, number> = {};
     const byPriority: Record<string, number> = {};
-
     for (const entry of entries) {
-      byCategory[entry.category] = (byCategory[entry.category] || 0) + 1;
-      byPriority[entry.priority] = (byPriority[entry.priority] || 0) + 1;
+      byCategory[entry.category] = (byCategory[entry.category] ?? 0) + 1;
+      byPriority[entry.priority] = (byPriority[entry.priority] ?? 0) + 1;
     }
-
-    return {
-      total: entries.length,
-      byCategory,
-      byPriority,
-    };
+    return { total: entries.length, byCategory, byPriority };
   }
 
+  // Stubs — paths resolved at runtime via env/config, not hardcoded
   async syncWithAspenGroves(): Promise<boolean> {
-    console.log('Syncing with Aspen Groves...');
-    // Future: sync to /Users/macarena1/00_STRATEGY_CORE
+    const path = import.meta.env?.VITE_ASPEN_GROVE_PATH ?? `${process.env['HOME'] ?? '~'}/00_STRATEGY_CORE`;
+    console.info(`[memory] Aspen Grove sync target: ${path}`);
     return true;
   }
 
   async syncWithGemini(): Promise<boolean> {
-    console.log('Syncing with Gemini memory...');
-    // Future: sync to ~/.gemini
+    const path = import.meta.env?.VITE_GEMINI_PATH ?? `${process.env['HOME'] ?? '~'}/.gemini`;
+    console.info(`[memory] Gemini sync target: ${path}`);
     return true;
   }
 
@@ -110,9 +93,7 @@ export class MemorySystem {
     try {
       const data = JSON.stringify(Array.from(this.cache.entries()));
       localStorage.setItem('procode-memory', data);
-    } catch {
-      // localStorage not available
-    }
+    } catch { /* localStorage not available — in-memory only */ }
   }
 
   private loadFromStorage(): void {
@@ -120,13 +101,9 @@ export class MemorySystem {
       const data = localStorage.getItem('procode-memory');
       if (data) {
         const entries = JSON.parse(data) as [string, MemoryEntry][];
-        for (const [key, value] of entries) {
-          this.cache.set(key, value);
-        }
+        for (const [key, value] of entries) this.cache.set(key, value);
       }
-    } catch {
-      // localStorage not available
-    }
+    } catch { /* localStorage not available */ }
   }
 }
 
