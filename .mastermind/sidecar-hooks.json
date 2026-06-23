@@ -1,0 +1,20 @@
+{
+  "policy_name": "pro-code Mastermind Sidecar Hooks",
+  "repo": "GlacierEQ/pro-code",
+  "phase": "phase_1a_hidden_substrate",
+  "last_updated": "2026-06-23",
+  "mastermind_doctrine": "GlacierEQ/Pro-Mastermind",
+  "mastermind_runtime": "GlacierEQ/mastermind",
+  "sidecar_role": "runtime_improvement_agent",
+  "read_targets": ["README.md", "KNOWLEDGE.md", "src/workers.ts", "src/memory.ts", "ci/", ".apex/repo-profile.json", ".helix/strand.json", ".aspen/grove-sync-policy.json", ".pistons/worker-registry.json"],
+  "write_targets_allowed": [".audit/", ".mastermind/", "docs/", "tests/", "ci/"],
+  "write_targets_restricted": ["src/workers.ts", "src/memory.ts", "package.json", "vite.config.*"],
+  "required_review_for_restricted_targets": true,
+  "loop": {
+    "observe": "read runtime health, CI state, worker drift, and repo substrate",
+    "orient": "compare against Pro_Code doctrine and Aspen Grove registry",
+    "decide": "draft minimal patch proposal with risk classification",
+    "act": "write only on feature branches unless explicitly authorized"
+  },
+  "blocked_actions": ["direct_main_mutation_without_authorization", "raw_secret_write", "raw_sensitive_record_write", "destructive_history_rewrite"]
+}
