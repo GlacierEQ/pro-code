@@ -1,0 +1,70 @@
+name: Helix Verify
+
+on:
+  push:
+    branches:
+      - helix-phase-1b
+      - main
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      check_peer:
+        description: "Attempt paired repo checkout using HELIX_CROSS_REPO_TOKEN"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this strand
+        uses: actions/checkout@v4
+        with:
+          path: self
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Verify local Helix substrate
+        run: |
+          python self/tools/helix_verify.py \
+            --repo-root self \
+            --expected-repo GlacierEQ/pro-code \
+            --expected-role runtime_strand \
+            --report .audit/helix-verification-report.json
+
+      - name: Checkout paired doctrine strand
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.check_peer == 'true' && secrets.HELIX_CROSS_REPO_TOKEN != '' }}
+        uses: actions/checkout@v4
+        with:
+          repository: GlacierEQ/Pro_Code
+          ref: helix-phase-1b
+          token: ${{ secrets.HELIX_CROSS_REPO_TOKEN }}
+          path: peer/Pro_Code
+
+      - name: Verify reciprocal pair
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.check_peer == 'true' && secrets.HELIX_CROSS_REPO_TOKEN != '' }}
+        run: |
+          python self/tools/helix_verify.py \
+            --repo-root self \
+            --expected-repo GlacierEQ/pro-code \
+            --expected-role runtime_strand \
+            --peer-root peer/Pro_Code \
+            --report .audit/helix-verification-report.json
+
+      - name: Upload verification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: helix-verification-report-pro-code
+          path: self/.audit/helix-verification-report.json
+          if-no-files-found: ignore
