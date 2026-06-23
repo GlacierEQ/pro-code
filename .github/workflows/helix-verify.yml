@@ -43,7 +43,7 @@ jobs:
             --report .audit/helix-verification-report.json
 
       - name: Checkout paired doctrine strand
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.check_peer == 'true' && secrets.HELIX_CROSS_REPO_TOKEN != '' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.check_peer == 'true' }}
         uses: actions/checkout@v4
         with:
           repository: GlacierEQ/Pro_Code
@@ -52,7 +52,7 @@ jobs:
           path: peer/Pro_Code
 
       - name: Verify reciprocal pair
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.check_peer == 'true' && secrets.HELIX_CROSS_REPO_TOKEN != '' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.check_peer == 'true' }}
         run: |
           python self/tools/helix_verify.py \
             --repo-root self \
