@@ -1,0 +1,47 @@
+{
+  "map_name": "pro-code Helix Symlink Map",
+  "repo": "GlacierEQ/pro-code",
+  "branch": "helix-phase-1b",
+  "mode": "pointer_manifest",
+  "reason": "GitHub contents API writes regular files; this manifest defines stable symlink-equivalent activation pointers without rewriting history.",
+  "last_updated": "2026-06-23",
+  "local_links": [
+    {
+      "link": "HELIX.md",
+      "target": ".helix/phase-1b-contract.md",
+      "purpose": "human activation entrypoint"
+    },
+    {
+      "link": "HELIX_VERIFY.py",
+      "target": "tools/helix_verify.py",
+      "purpose": "verifier entrypoint"
+    },
+    {
+      "link": "REPO_PROFILE.json",
+      "target": ".apex/repo-profile.json",
+      "purpose": "repo identity pointer"
+    },
+    {
+      "link": "STRAND.json",
+      "target": ".helix/strand.json",
+      "purpose": "strand identity pointer"
+    }
+  ],
+  "paired_links": [
+    {
+      "link": "doctrine_strand",
+      "target": "github:GlacierEQ/Pro_Code@helix-phase-1b:.helix/strand.json",
+      "purpose": "paired doctrine strand declaration"
+    },
+    {
+      "link": "doctrine_profile",
+      "target": "github:GlacierEQ/Pro_Code@helix-phase-1b:.apex/repo-profile.json",
+      "purpose": "paired doctrine repo profile"
+    }
+  ],
+  "activation_policy": {
+    "main_fast_forward_allowed": true,
+    "requires_clean_compare": true,
+    "actual_git_symlink_upgrade_allowed_when_tree_api_context_is_available": true
+  }
+}
