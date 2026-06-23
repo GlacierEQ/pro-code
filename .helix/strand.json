@@ -1,0 +1,48 @@
+{
+  "strand_id": "pro-code",
+  "strand_type": "runtime",
+  "helix_role": "Spiral Engine runtime strand",
+  "paired_strand": "GlacierEQ/Pro_Code",
+  "paired_strand_role": "Double Helix doctrine strand",
+  "inherits_from": [
+    "GlacierEQ/Pro_Code",
+    "GlacierEQ/aspen-grove-core"
+  ],
+  "exports_to": [
+    "GlacierEQ/Pro_Code",
+    "GlacierEQ/Pro-Mastermind",
+    "GlacierEQ/mastermind",
+    "GlacierEQ/aspen-grove-core",
+    "GlacierEQ/Pro-CI",
+    "GlacierEQ/Pro-Connectors"
+  ],
+  "authority": {
+    "identity": false,
+    "style": false,
+    "link_library": false,
+    "agent_loading": false,
+    "repo_inheritance": false,
+    "runtime_execution": true,
+    "worker_mesh": true,
+    "ci_templates": true,
+    "nexus_bridge": true
+  },
+  "boot_order": [
+    "Pro_Code/CODER-SKILL.md",
+    "Pro_Code/STYLE.md",
+    "Pro_Code/LINK-LIBRARY.md",
+    "Pro_Code/REPO-AUDIT.md",
+    "pro-code/KNOWLEDGE.md",
+    "pro-code/src/workers.ts",
+    "pro-code/src/memory.ts",
+    "aspen-grove-core/ASPEN_GROVE_CONSTELLATION.json"
+  ],
+  "non_goals": [
+    "do_not_store_raw_secrets",
+    "do_not_store_raw_sensitive_records",
+    "do_not_replace_Pro_Code_doctrine",
+    "do_not_duplicate_aspen_grove_constellation"
+  ],
+  "phase": "phase_1a_hidden_substrate",
+  "last_updated": "2026-06-23"
+}
