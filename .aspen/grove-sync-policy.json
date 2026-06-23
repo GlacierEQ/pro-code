@@ -1,0 +1,35 @@
+{
+  "policy_name": "pro-code Grove Sync Policy",
+  "repo": "GlacierEQ/pro-code",
+  "phase": "phase_1a_hidden_substrate",
+  "last_updated": "2026-06-23",
+  "aspen_grove_root": "GlacierEQ/aspen-grove-core",
+  "paired_doctrine_strand": "GlacierEQ/Pro_Code",
+  "sync_role": "runtime_signal_producer",
+  "memory_scope": {
+    "hot": "local runtime state, worker health, UI session state",
+    "warm": "Supabase or Mem0 summaries of worker runs and repo health",
+    "cool": "Supermemory or graph-level event summaries",
+    "frozen": "Dropbox or Drive pointer references only"
+  },
+  "allowed_exports": [
+    "worker_registry",
+    "runtime_health",
+    "ci_template_index",
+    "nexus_endpoint_contract",
+    "audit_summaries",
+    "patch_proposals"
+  ],
+  "blocked_exports": [
+    "raw_secrets",
+    "raw_tokens",
+    "raw_sensitive_records",
+    "local_env_files",
+    "private_runtime_cache"
+  ],
+  "event_contract": {
+    "every_runtime_change_emits": ["repo", "branch", "commit_sha", "component", "event_type", "summary", "timestamp"],
+    "prefer_pointer_refs": true,
+    "include_hash_when_file_content_matters": true
+  }
+}
