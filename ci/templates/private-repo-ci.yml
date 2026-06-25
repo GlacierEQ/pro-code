@@ -1,0 +1,21 @@
+# ═══════════════════════════════════════════════════════════════
+# GlacierEQ APEX — CI Template for Private Repos
+# ═══════════════════════════════════════════════════════════════
+# Copy this file to: .github/workflows/ci.yml in your private repo
+# Code stays private — runner executes from public-actions-runner-host
+# ═══════════════════════════════════════════════════════════════
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    uses: GlacierEQ/public-actions-runner-host/.github/workflows/reusable-quick-ci.yml@main
+    with:
+      repo_name: ${{ github.event.repository.name }}
+      language: python  # Change to: python | typescript | javascript
