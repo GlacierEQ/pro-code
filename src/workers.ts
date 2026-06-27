@@ -57,6 +57,9 @@ export const NOTION_WORKERS: WorkerConfig[] = [
   // Legal / case
   { id: '019eae1c-0000', name: 'case-analyzer',     capabilities: ['analyzeCase', 'consolidateCases', 'caseSync'],                      status: 'deployed', runsCount: 0 },
   { id: '019eae1c-e35f', name: 'motion-generator',  capabilities: ['generateMotion', 'generateBatchMotions', 'motionSync'],              status: 'deployed', runsCount: 0 },
+  // AI / Automation ecosystem (new - integrates gemma-cli handoff, model_router, Ollama/Groq hybrid)
+  { id: '019eae1d-0000', name: 'ai-executor',       capabilities: ['executeLocalModel', 'handoffFromGemini', 'automationDispatch', 'modelMaximize'], status: 'deployed', runsCount: 0 },
+  { id: '019eae1d-a1b2', name: 'automation-orchestrator', capabilities: ['runApexMaximize', 'dispatchWorker', 'helixAutomation', 'notionSync'], status: 'deployed', runsCount: 0 },
 ];
 
 // ─── health check ─────────────────────────────────────────────────────────────
