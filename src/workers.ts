@@ -272,7 +272,7 @@ export class WorkersManager {
 
     let security: DispatchSecurity = {};
     try {
-      security = this.authHook ? await this.authHook(unsigned) : {};
+      security = (this.authHook ? await this.authHook(unsigned) : {}) ?? {};
     } catch (error) {
       return this.reject(
         worker.name,
@@ -330,7 +330,9 @@ export class WorkersManager {
         envelope,
       };
     } catch (error) {
-      const typed = error as { kind?: string; message?: string };
+      const typed = (error && typeof error === 'object')
+        ? error as { kind?: string; message?: string }
+        : {};
       const dispatchError: DispatchError = typed.kind === 'runtime'
         ? { code: 'runtime_rejected', message: typed.message ?? 'Runtime rejected dispatch' }
         : typed.kind === 'invalid'
@@ -377,7 +379,7 @@ export class WorkersManager {
     if (health.status === 'ok' && health.runtimeHealth?.workers) {
       const liveSet = new Set(health.runtimeHealth.workers);
       this.workers.forEach(worker => {
-        if (liveSet.has(worker.name) && worker.status !== 'running') {
+        if (liveSet.has(worker.name) && worker.status !== 'running' && worker.status !== 'paused') {
           worker.status = 'deployed';
           worker.lastError = undefined;
         }
