@@ -122,4 +122,46 @@ describe('WorkersManager dispatch contract', () => {
     expect(result.error?.code).toBe('unknown_capability');
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  it('handles a nullish rejected value without crashing the catch path', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockRejectedValue(null);
+    const manager = new WorkersManager({ fetchImpl, baseUrl: '', caseId: 'CASE-1' });
+
+    const result = await manager.execute('analyzeCase');
+
+    expect(result).toMatchObject({ status: 'failed', success: false, live: false });
+    expect(result.error).toMatchObject({ code: 'transport_failed', message: 'null' });
+  });
+
+  it('treats a nullish auth hook result as empty security metadata', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(okResponse());
+    const authHook = vi.fn().mockResolvedValue(undefined);
+    const manager = new WorkersManager({
+      fetchImpl,
+      baseUrl: '',
+      caseId: 'CASE-1',
+      authHook: authHook as never,
+    });
+
+    const result = await manager.execute('analyzeCase');
+
+    expect(result).toMatchObject({ status: 'succeeded', success: true });
+    const [, init] = fetchImpl.mock.calls[0];
+    expect(init?.headers).toMatchObject({ 'Content-Type': 'application/json' });
+  });
+
+  it('does not overwrite a manual pause during runtime sync', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({
+        status: 'ok',
+        runtime: { status: 'ok', workers: ['case-analyzer'] },
+      }), { status: 200 }),
+    );
+    const manager = new WorkersManager({ fetchImpl, baseUrl: '', caseId: 'CASE-1' });
+    expect(manager.pauseWorker('case-analyzer')).toBe(true);
+
+    await manager.syncFromRuntime();
+
+    expect(manager.findWorkerByName('case-analyzer')?.status).toBe('paused');
+  });
 });
