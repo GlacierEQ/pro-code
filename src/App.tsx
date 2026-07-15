@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { memory } from './memory';
-import { workersManager, NOTION_WORKERS } from './workers';
+import { getNexusBaseUrl, workersManager, NOTION_WORKERS } from './workers';
 import type { WorkerConfig } from './workers';
 import './App.css';
 
-const NEXUS = `http://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:8002`;
+const NEXUS = getNexusBaseUrl();
+const ACTIVE_CASE_ID = import.meta.env.VITE_CASE_ID?.trim();
 
 // ── Trigger buttons ──────────────────────────────────────────────────────────
 type BtnKey = 'omniCrawl' | 'apexBoot' | 'megaPdf' | 'juggernautOffice' | 'quantumSovereign' | 'stealthSonic' | 'aeon777' | 'forensicPipeline';
@@ -89,24 +90,12 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── nexus trigger ──────────────────────────────────────────────────────────
-  const triggerNexus = useCallback(async (key: BtnKey) => {
-    setBtnLoading(prev => new Map(prev).set(key, true));
-    setBtnStatus(prev => new Map(prev).set(key, 'Dispatching…'));
-    addLog(`Trigger: ${TRIGGERS[key].label}`, 'info');
-    try {
-      const res = await fetch(`${NEXUS}${TRIGGERS[key].endpoint}`, { method: 'POST' });
-      const data = await res.json() as { message?: string };
-      const msg = data.message ?? 'Acknowledged.';
-      setBtnStatus(prev => new Map(prev).set(key, msg));
-      addLog(`✓ ${TRIGGERS[key].label}: ${msg}`, 'success');
-      await workersManager.execute(key, { triggeredAt: new Date().toISOString() });
-    } catch {
-      setBtnStatus(prev => new Map(prev).set(key, 'Error — is the Nexus running?'));
-      addLog(`✗ ${TRIGGERS[key].label} failed`, 'error');
-    } finally {
-      setBtnLoading(prev => new Map(prev).set(key, false));
-    }
+  // ── legacy pipeline triggers ─────────────────────────────────────────────────
+  const triggerNexus = useCallback((key: BtnKey) => {
+    const message = 'Blocked: legacy pipeline endpoints do not implement the case-scoped dispatch contract.';
+    setBtnLoading(prev => new Map(prev).set(key, false));
+    setBtnStatus(prev => new Map(prev).set(key, message));
+    addLog(`✗ ${TRIGGERS[key].label}: ${message}`, 'error');
   }, [addLog]);
 
   // ── capability dispatch ────────────────────────────────────────────────────
@@ -115,13 +104,19 @@ export default function App() {
     setCapResult(null);
     addLog(`Dispatch capability: ${cap}`, 'info');
     try {
-      const result = await workersManager.execute(cap);
-      setCapResult(`[${result.live ? 'LIVE' : 'FALLBACK'}] ${result.worker} → ${result.result} (${result.durationMs}ms)`);
-      addLog(`✓ ${cap} → ${result.worker} (${result.durationMs}ms)`, result.live ? 'success' : 'warn');
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setCapResult(`Error: ${msg}`);
-      addLog(`✗ ${cap} error: ${msg}`, 'error');
+      const result = await workersManager.execute(cap, {}, { caseId: ACTIVE_CASE_ID });
+      const detail = result.success
+        ? result.result
+        : `${result.error?.code ?? 'dispatch_failed'}: ${result.error?.message ?? 'No result'}`;
+      setCapResult(`[${result.status.toUpperCase()}] ${result.worker} → ${detail} (${result.durationMs}ms)`);
+      addLog(
+        `${result.success ? '✓' : '✗'} ${cap} → ${result.worker} (${result.durationMs}ms)`,
+        result.success ? 'success' : 'error',
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setCapResult(`[FAILED] ${message}`);
+      addLog(`✗ ${cap} error: ${message}`, 'error');
     } finally {
       setCapLoading(false);
     }
@@ -150,11 +145,11 @@ export default function App() {
           <div>
             <p className="eyebrow">GlacierEQ · APEX Runtime</p>
             <h1>Pro&#8209;Code</h1>
-            <p className="lede">QUANTUM-SOVEREIGN orchestration layer — 13-worker Notion mesh, forensic pipeline, federal motion generation.</p>
+            <p className="lede">QUANTUM-SOVEREIGN orchestration layer — 15-worker Notion mesh, forensic pipeline, federal motion generation.</p>
           </div>
         </div>
         <div className="hero__meta">
-          <div className={`status-pill nexus-${nexusStatus}`} title={`Nexus API :8002 — ${nexusStatus}`}>
+          <div className={`status-pill nexus-${nexusStatus}`} title={`Configured Nexus API — ${nexusStatus}`}>
             <span className="status-dot" />
             {nexusStatus === 'checking' ? 'Connecting…' : nexusStatus === 'online' ? 'Nexus Live' : 'Nexus Offline'}
           </div>
@@ -187,7 +182,7 @@ export default function App() {
       <section className="stats" aria-label="Runtime metrics">
         {[
           { label: 'Memory',     value: memoryCount },
-          { label: 'Workers',    value: stats.deployed },
+          { label: 'Workers',    value: stats.total },
           { label: 'Running',    value: stats.running,  highlight: stats.running > 0 },
           { label: 'Total Runs', value: stats.totalRuns },
           { label: 'Errors',     value: stats.error,    highlight: stats.error > 0, danger: true },
@@ -203,7 +198,7 @@ export default function App() {
       <section className="trigger-console" aria-labelledby="triggers-heading">
         <div className="section-header">
           <h2 id="triggers-heading"><span className="section-icon">⟁</span> Command Console</h2>
-          {nexusOnline === false && <span className="nexus-warning">⚠ Nexus offline — triggers disabled</span>}
+          <span className="nexus-warning">⚠ Legacy raw triggers disabled — use case-scoped worker dispatch</span>
         </div>
         {tierGroups.map(({ tier, keys }) => (
           <div key={tier} className={`trigger-tier trigger-tier--${tier}`}>
@@ -218,7 +213,7 @@ export default function App() {
                     <button
                       className={`trigger-btn trigger-btn--${tier}`}
                       onClick={() => void triggerNexus(key)}
-                      disabled={!nexusOnline || loading}
+                      disabled={true}
                       aria-busy={loading}
                     >
                       <span className="trigger-icon">{loading ? '⏳' : t.icon}</span>
@@ -244,7 +239,7 @@ export default function App() {
               className={`tab-btn${selectedTab === tab ? ' tab-btn--active' : ''}`}
               onClick={() => setSelectedTab(tab)}
             >
-              {tab === 'workers' ? `Workers (${stats.deployed})` : tab === 'agents' ? 'QS Agents' : 'Capabilities'}
+              {tab === 'workers' ? `Workers (${stats.total})` : tab === 'agents' ? 'QS Agents' : 'Capabilities'}
             </button>
           ))}
         </nav>
@@ -325,7 +320,7 @@ export default function App() {
               {capLoading && <span className="cap-spinning">⏳</span>}
             </div>
             {capResult && (
-              <div className={`cap-result${capResult.startsWith('Error') ? ' cap-result--error' : ''}`}>
+              <div className={`cap-result${capResult.startsWith('[SUCCEEDED]') ? '' : ' cap-result--error'}`}>
                 <code>{capResult}</code>
               </div>
             )}
