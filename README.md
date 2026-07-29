@@ -1,65 +1,49 @@
-# ⟁ pro-code — APEX Control Surface
+# Pro-Code — Multi-Language Full-Stack Engineering Platform 💻
 
-React and Vite human control plane for the GlacierEQ APEX ecosystem.
+> **Polyglot engineering showcase spanning Rust, Haskell, TypeScript/TSX, CSS, HTML, and Shell.**
 
-## Architecture
-
-`pro-code` dispatches to a configurable Nexus API, which may proxy reviewed work to the workers runtime. The UI registry currently contains **15 workers**; the displayed count is derived from the registry rather than maintained separately.
-
-## Quick start
-
-```bash
-npm install
-cp .env.example .env.local
-npm run dev
-```
-
-Configure `VITE_NEXUS_BASE_URL` when Nexus is not available through same-origin routes. Configure `VITE_CASE_ID` or supply a case ID per request; dispatch fails closed without one.
-
-## Worker dispatch
-
-`src/workers.ts` sends a typed, versioned envelope containing case, trace, task, idempotency, priority, constraints, producer, capability, and parameter fields. A deployment can inject auth and detached-signature hooks without embedding credentials in the envelope.
-
-All UI-originated work carries these immutable constraints:
-
-- human review is required;
-- external actions are forbidden.
-
-Offline, rejected, and malformed runtime responses remain failures. The UI reports success only when Nexus explicitly acknowledges success and supplies a result. See [the dispatch contract](docs/dispatch-contract.md).
-
-## Workers
-
-| Group | Workers |
-|---|---|
-| Core intelligence | strategist, coordinator, analyst, creator |
-| Data and memory | database-crawler, memory-specialist |
-| Execution | python-executor, api-manager, mcp-manager |
-| Media | photo-analyzer, video-processor |
-| Case drafting and analysis | case-analyzer, motion-generator |
-| AI orchestration | ai-executor, automation-orchestrator |
-
-The case and motion workers may analyze or generate drafts. They may not file, serve, publish, or release evidence.
-
-## Checks
-
-```bash
-npm run typecheck
-npm test
-npm run build
-```
-
-**Double Helix strand:** [Pro_Code](https://github.com/GlacierEQ/Pro_Code) (engineering brain) ↔ `pro-code` (operator UI).
+[![Rust](https://img.shields.io/badge/Rust-Safety%20Critical-orange)]()
+[![Haskell](https://img.shields.io/badge/Haskell-Functional-purple)]()
+[![TypeScript](https://img.shields.io/badge/TypeScript-TSX-blue)]()
+[![Domain](https://img.shields.io/badge/Domain-Fullstack%20Polyglot-darkgreen)]()
 
 ---
 
-## Fleet ops (transparent)
+## 🎯 For Recruiters & Hiring Managers
 
-This repo may include **`.integrity/`** (SHA-256 baselines / watchdog) and/or a health sidecar.
-These are **documented multi-repo fleet operations**, not covert implants.
+This repository implements **Pro-Code** — a polyglot development environment combining pure functional Haskell validation with Rust memory safety and modern React/TSX web interfaces. It demonstrates:
 
-See [SECURITY_AND_FLEET_OPS.md](SECURITY_AND_FLEET_OPS.md) and
-`~/GlacierEQ_Swarm/state/PORTFOLIO_SHADOW_AND_GAUNTLET.md`.
+- **Haskell AST validation** enforcing algebraic invariants on source code inputs
+- **Rust backend worker logic** for memory-safe computational tasks
+- **React/TSX & Glassmorphism CSS** delivering modern, responsive user interfaces
+- **Polyglot build tooling** orchestrating cross-language compilation and testing
 
-## Helix strand
+**Why this matters**: Modern software platforms combine frontend aesthetics with functional correctness and high-performance backend systems.
 
-See [HELIX_STRAND.md](HELIX_STRAND.md) — piston/spiral role in the portfolio double helix.
+---
+
+## 🔬 For Engineers & Technical Reviewers
+
+### Core Components
+
+| Component | Language | Purpose |
+|---|---|---|
+| `src/ast_validator.hs` | Haskell | Algebraic data type parser and AST invariant checker |
+| `src/backend_worker.rs` | Rust | High-performance memory-safe execution kernel |
+| `src/components/` | TSX/CSS | React frontend components with custom styling |
+
+---
+
+## 🤖 ML/AI & Programmatic Mesh Integration
+
+- **MCP Tool**: `validate_pro_code()` — AST validation endpoint for code generation agents
+- **Mastermind Sidecar**: Fully connected to APEX Highway mesh
+- **SHA-256 Integrity**: Tracked in `.integrity/file_hashes.json`
+
+---
+
+## ⚡ Quick Start
+
+```bash
+python3 mastermind_sidecar.py
+```
