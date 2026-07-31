@@ -1,0 +1,7 @@
+{
+  "schema_id": "glaciereq.nervous-system.v1",
+  "repository": "GlacierEQ/pro-code",
+  "role": "governed_engineering_execution",
+  "canonical_manifest": "GlacierEQ/AKOS/governance/glaciereq.nervous-system.v1.json",
+  "operating_sequence": ["memory", "tool", "cure", "innovate", "respond"]
+}
