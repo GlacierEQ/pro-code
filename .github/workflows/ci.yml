@@ -1,17 +1,78 @@
-name: CI
+name: Pro-Code native verification
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
-  ci:
-    uses: GlacierEQ/public-actions-runner-host/.github/workflows/reusable-ci.yml@main
-    with:
-      repo_name: ${{ github.event.repository.name }}
-      language: node
-      run_tests: true
-      run_lint: true
-      run_security: true
+  typescript:
+    name: TypeScript build and behavior
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Execute Vitest suite
+        run: npm test -- --reporter=verbose
+
+      - name: Build production bundle
+        run: npm run build
+
+  native-contracts:
+    name: Python, Rust, and Haskell contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Haskell
+        uses: haskell-actions/setup@v2
+        with:
+          ghc-version: "9.6"
+
+      - name: Execute Python contract tests
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+
+      - name: Execute native Rust governor tests
+        run: |
+          rustc --edition 2021 --test src/governor.rs -o /tmp/pro-code-governor-tests
+          /tmp/pro-code-governor-tests
+
+      - name: Execute native Haskell AST invariants
+        run: |
+          ghc -Wall -Werror -isrc tests/ASTValidatorSpec.hs -o /tmp/pro-code-ast-tests
+          /tmp/pro-code-ast-tests
