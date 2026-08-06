@@ -18,6 +18,7 @@ export async function startAutomaticRuntime({ env = process.env, now } = {}) {
     port: Number(env.PRO_CODE_PORT ?? 8787),
     env,
     now,
+    automation,
   });
 
   started.server.once('close', () => automation.stop());
@@ -30,9 +31,15 @@ export async function startAutomaticRuntime({ env = process.env, now } = {}) {
     startup,
     async close() {
       automation.stop();
-      await new Promise((resolve, reject) => {
+      const closeServer = new Promise((resolve, reject) => {
         started.server.close(error => error ? reject(error) : resolve());
       });
+      const [serverResult, automationResult] = await Promise.allSettled([
+        closeServer,
+        automation.waitForIdle(),
+      ]);
+      if (serverResult.status === 'rejected') throw serverResult.reason;
+      if (automationResult.status === 'rejected') throw automationResult.reason;
     },
   };
 }
