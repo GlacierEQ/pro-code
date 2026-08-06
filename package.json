@@ -13,8 +13,8 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "test": "node --test server/nexus.test.mjs server/automation.test.mjs && node node_modules/vitest/vitest.mjs run --exclude server/nexus.test.mjs --exclude server/automation.test.mjs",
-    "test:runtime": "node --test server/nexus.test.mjs server/automation.test.mjs",
+    "test": "node --test server/nexus.test.mjs server/automation.test.mjs server/automatic-runtime.test.mjs && node node_modules/vitest/vitest.mjs run --exclude server/nexus.test.mjs --exclude server/automation.test.mjs --exclude server/automatic-runtime.test.mjs",
+    "test:runtime": "node --test server/nexus.test.mjs server/automation.test.mjs server/automatic-runtime.test.mjs",
     "workers": "ls -la $HOME/.kiro/workers"
   },
   "dependencies": {
