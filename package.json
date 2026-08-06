@@ -1,15 +1,19 @@
 {
   "name": "pro-code",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/dev.mjs",
+    "dev:ui": "vite",
+    "runtime": "node server/nexus.mjs",
+    "start": "node server/nexus.mjs",
     "build": "tsc && vite build",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "test": "node node_modules/vitest/vitest.mjs run",
+    "test": "node --test server/nexus.test.mjs && node node_modules/vitest/vitest.mjs run",
+    "test:runtime": "node --test server/nexus.test.mjs",
     "workers": "ls -la $HOME/.kiro/workers"
   },
   "dependencies": {
