@@ -26,7 +26,7 @@ const EVIDENCE_TERMS = Object.freeze([
 const ACTIVE_CAPABILITIES = new Set([
   'analyzeCase', 'consolidateCases', 'crawlDatabase', 'pageSync', 'dataIngestionSync',
   'generateReport', 'runApexMaximize', 'helixAutomation', 'automationDispatch',
-  'modelMaximize', 'organizeMemory', 'extractMemory', 'memorySync',
+  'modelMaximize', 'organizeMemory', 'extractMemory', 'memorySync', 'generateBatchMotions',
 ]);
 
 function positiveInteger(value, fallback, min = 1, max = Number.MAX_SAFE_INTEGER) {
@@ -200,6 +200,10 @@ export class WorkspaceAutomation {
     this.timer = null;
   }
 
+  async waitForIdle() {
+    if (this.inFlight) await this.inFlight;
+  }
+
   async run(reason = 'manual') {
     if (!this.enabled && reason !== 'manual') return this.getStatus();
     if (this.inFlight) return this.inFlight;
@@ -327,7 +331,14 @@ export class WorkspaceAutomation {
         if (hashStatus === 'hashed') {
           try {
             fileHash = await sha256(absolutePath);
+            const afterHash = await stat(absolutePath);
+            if (afterHash.size !== metadata.size || afterHash.mtimeMs !== metadata.mtimeMs) {
+              metadata = afterHash;
+              fileHash = null;
+              hashStatus = 'unstable';
+            }
           } catch {
+            fileHash = null;
             hashStatus = 'failed';
           }
         }
