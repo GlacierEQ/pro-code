@@ -1,9 +1,9 @@
 /**
  * Browser-local memory for Pro-Code.
  *
- * The in-memory and localStorage layers are implemented. Optional external
- * synchronization remains explicit and fail-closed because a browser cannot
- * write to operator filesystem paths without a trusted runtime boundary.
+ * Local state is persisted immediately. The optional local Nexus runtime accepts
+ * context updates and can atomically synchronize snapshots to explicitly
+ * configured Aspen Grove or Gemini directories.
  */
 
 export interface MemoryEntry {
@@ -14,11 +14,42 @@ export interface MemoryEntry {
   timestamp: string;
 }
 
-const COMET_AGENT_URL = 'http://localhost:8787';
+export type MemorySyncTarget = 'aspen' | 'gemini';
+
+export type MemorySyncResult =
+  | {
+      status: 'completed';
+      target: MemorySyncTarget;
+      path: string;
+      records_confirmed: number;
+      content_digest: string;
+      completed_at: string;
+    }
+  | {
+      status: 'unsupported' | 'failed' | 'rejected';
+      target?: MemorySyncTarget;
+      reason?: string;
+      error?: string;
+    };
+
+function runtimeBaseUrl(): string {
+  const configured = import.meta.env.VITE_NEXUS_BASE_URL?.trim();
+  return (configured || 'http://127.0.0.1:8787').replace(/\/+$/, '');
+}
+
+function isMemoryEntry(value: unknown): value is MemoryEntry {
+  if (!value || typeof value !== 'object') return false;
+  const entry = value as Partial<MemoryEntry>;
+  return typeof entry.id === 'string'
+    && typeof entry.content === 'string'
+    && ['short-term', 'long-term', 'episodic'].includes(String(entry.category))
+    && ['low', 'medium', 'high'].includes(String(entry.priority))
+    && typeof entry.timestamp === 'string';
+}
 
 export class MemorySystem {
   private cache: Map<string, MemoryEntry> = new Map();
-  private sessionId: string;
+  private readonly sessionId: string;
 
   constructor() {
     this.sessionId = `procode-${Date.now()}`;
@@ -41,14 +72,16 @@ export class MemorySystem {
     this.cache.set(id, entry);
     this.persistToStorage();
 
-    fetch(`${COMET_AGENT_URL}/context/${this.sessionId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data: { [id]: entry } }),
-      signal: AbortSignal.timeout(3_000),
-    }).catch(() => {
-      // comet-agent is optional; failed transport is never converted to success.
-    });
+    try {
+      await fetch(`${runtimeBaseUrl()}/context/${encodeURIComponent(this.sessionId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: { [id]: entry } }),
+        signal: AbortSignal.timeout(3_000),
+      });
+    } catch {
+      // The browser-local write is already complete. Remote context is optional.
+    }
   }
 
   async get(id: string): Promise<MemoryEntry | undefined> {
@@ -60,7 +93,7 @@ export class MemorySystem {
   }
 
   async getByCategory(category: MemoryEntry['category']): Promise<MemoryEntry[]> {
-    return Array.from(this.cache.values()).filter((entry) => entry.category === category);
+    return Array.from(this.cache.values()).filter(entry => entry.category === category);
   }
 
   async delete(id: string): Promise<boolean> {
@@ -89,28 +122,37 @@ export class MemorySystem {
     return { total: entries.length, byCategory, byPriority };
   }
 
-  async syncWithAspenGroves(): Promise<boolean> {
-    return this.reportUnimplementedFilesystemSync(
-      'Aspen Grove',
-      import.meta.env.VITE_ASPEN_GROVE_PATH,
-    );
+  async syncWithAspenGroves(): Promise<MemorySyncResult> {
+    return this.sync('aspen');
   }
 
-  async syncWithGemini(): Promise<boolean> {
-    return this.reportUnimplementedFilesystemSync(
-      'Gemini',
-      import.meta.env.VITE_GEMINI_PATH,
-    );
+  async syncWithGemini(): Promise<MemorySyncResult> {
+    return this.sync('gemini');
   }
 
-  private reportUnimplementedFilesystemSync(label: string, configuredPath?: string): false {
-    const target = configuredPath?.trim();
-    console.warn(
-      target
-        ? `[memory] ${label} target ${target} is configured, but no trusted filesystem bridge is implemented.`
-        : `[memory] ${label} sync is unavailable: no target and no trusted filesystem bridge are configured.`,
-    );
-    return false;
+  private async sync(target: MemorySyncTarget): Promise<MemorySyncResult> {
+    try {
+      const response = await fetch(`${runtimeBaseUrl()}/api/v1/memory/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target, entries: Array.from(this.cache.values()) }),
+        signal: AbortSignal.timeout(10_000),
+      });
+      const payload = await response.json().catch(() => null) as MemorySyncResult | null;
+      if (!payload || typeof payload.status !== 'string') {
+        return { status: 'failed', target, error: 'Runtime returned an invalid synchronization response' };
+      }
+      if (!response.ok && payload.status === 'completed') {
+        return { status: 'failed', target, error: `Runtime returned HTTP ${response.status}` };
+      }
+      return payload;
+    } catch (error) {
+      return {
+        status: 'failed',
+        target,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   private persistToStorage(): void {
@@ -125,9 +167,13 @@ export class MemorySystem {
   private loadFromStorage(): void {
     try {
       const data = localStorage.getItem('procode-memory');
-      if (data) {
-        const entries = JSON.parse(data) as [string, MemoryEntry][];
-        for (const [key, value] of entries) this.cache.set(key, value);
+      if (!data) return;
+      const entries = JSON.parse(data) as unknown;
+      if (!Array.isArray(entries)) return;
+      for (const item of entries) {
+        if (!Array.isArray(item) || item.length !== 2) continue;
+        const [key, value] = item;
+        if (typeof key === 'string' && isMemoryEntry(value)) this.cache.set(key, value);
       }
     } catch {
       // localStorage unavailable or invalid; start with an empty in-memory cache.
