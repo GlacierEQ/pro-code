@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Pro-Code generated runtime intelligence
+.pro-code/runtime/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

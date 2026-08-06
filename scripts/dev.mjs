@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const runtimePath = path.join(ROOT, 'server', 'nexus.mjs');
+const runtimePath = path.join(ROOT, 'server', 'automatic-runtime.mjs');
 const vitePath = path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js');
 
 const children = new Set();
@@ -51,6 +51,9 @@ const runtimeEnv = {
   ...process.env,
   PRO_CODE_HOST: process.env.PRO_CODE_HOST ?? '127.0.0.1',
   PRO_CODE_PORT: process.env.PRO_CODE_PORT ?? '8787',
+  PRO_CODE_WORKSPACE_DIR: process.env.PRO_CODE_WORKSPACE_DIR ?? ROOT,
+  PRO_CODE_AUTOMATION_ENABLED: process.env.PRO_CODE_AUTOMATION_ENABLED ?? 'true',
+  PRO_CODE_AUTOMATION_INTERVAL_MS: process.env.PRO_CODE_AUTOMATION_INTERVAL_MS ?? '300000',
 };
 
 const uiEnv = {
@@ -59,5 +62,5 @@ const uiEnv = {
   VITE_CASE_ID: process.env.VITE_CASE_ID ?? 'CASE-LOCAL-DEMO',
 };
 
-launch('local Nexus runtime', [runtimePath], runtimeEnv);
+launch('automatic local runtime', [runtimePath], runtimeEnv);
 launch('Vite UI', [vitePath], uiEnv);
