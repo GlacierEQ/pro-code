@@ -10,9 +10,9 @@
 
 **Casey Del Carpio Barton is the elite human operator and final authority for his projects, experience, firsthand observations, objectives, values, and intended meaning.**
 
-The engineering system does not stand above Casey. It supports him. When Casey states a capability, experience, failure, requirement, or objective, the system preserves the statement and performs the work needed to prove, test, implement, and document it.
+The engineering system does not stand above Casey. It supports him. When Casey states a capability, experience, failure, requirement, objective, or aspiration, the system preserves it and performs the work needed to prove, test, implement, improve, and document it.
 
-See [`OPERATOR_AUTHORITY_AND_PROOF_PROTOCOL.md`](OPERATOR_AUTHORITY_AND_PROOF_PROTOCOL.md).
+See [`OPERATOR_AUTHORITY_AND_PROOF_PROTOCOL.md`](OPERATOR_AUTHORITY_AND_PROOF_PROTOCOL.md) and canonical AKOS LAW-018 / LAW-019.
 
 ---
 
@@ -33,28 +33,57 @@ The atom is not the invention. The molecule is.
 
 ---
 
-## The Seven Laws
+## The Nine Laws
 
-**0. Casey defines the claim and objective; the system proves and builds**
+**0. Casey defines the claim and objective; the system proves and builds**  
 Preserve Casey's exact meaning before analysis. Missing context or incomplete documentation creates retrieval and proof work. It does not authorize diminution, omission, or a generic substitute objective.
 
-**1. Comprehensibility over cleverness**
+**1. Comprehensibility over cleverness**  
 Every function should be readable by a competent engineer encountering it cold. If you have to explain the trick, the trick costs more than it's worth.
 
-**2. Failure is a first-class citizen**
+**2. Failure is a first-class citizen**  
 Design the error path with as much care as the happy path. The happy path is what you hope for. The error path is what you're responsible for.
 
-**3. The audit trail is sacred**
+**3. The audit trail is sacred**  
 Every significant operation leaves a trace — not just for debugging, but for operator confidence. An operator who can see exactly what happened and when trusts the system. Trust is load-bearing.
 
-**4. Complexity earns its keep**
+**4. Complexity earns its keep**  
 Every abstraction layer must pay for itself in clarity or capability. If a layer does neither, it's just indirection. Remove it.
 
-**5. The interface is the product**
+**5. The interface is the product**  
 An interface that lies about system state is not a product. It's a trap. Optimistic updates are fine. Optimistic updates that don't resolve are unacceptable.
 
-**6. According to the laws of nature**
+**6. According to the laws of nature**  
 Latency is real. Networks partition. Models have context windows. Memory evicts. APIs rate-limit. Design for physics, not for the demo.
+
+**7. Aspiration is a construction target, not a defect**  
+When the target is ahead of the code, classify the difference as an implementation gap and build upward. A blocked technique triggers another technique, another integration, another abstraction, or another experiment. Do not rewrite the dream downward merely because the current implementation has not reached it.
+
+**8. Calibrate at deployment, not by shrinking development**  
+Internal development may carry aggressive future-state designs, hypotheses, experiments, and targets. When work crosses into a public, production, legal, customer, recruiter, benchmark, or other reliance-bearing surface, calibrate present-tense claims to current evidence while preserving the stronger future vision as roadmap. The public truth boundary must never become the development ceiling.
+
+---
+
+## Development / deployment split
+
+```text
+PRIVATE DEVELOPMENT
+VISION -> TARGET -> GAP -> EXPERIMENT -> BUILD -> ITERATE
+                    |
+                    v
+             EXTERNAL CANDIDATE
+                    |
+                    v
+          CALIBRATE CURRENT CLAIMS
+                    |
+          +---------+---------+
+          |                   |
+          v                   v
+ VERIFIED NOW          FUTURE VISION
+ PUBLICLY CLAIMED      PRESERVED INTACT
+```
+
+The correct response to a README that is ahead of implementation is not automatically “rewrite the README.” First determine whether it is a **present-state claim** or a **target specification**. If it is the target, the code is behind.
 
 ---
 
@@ -79,6 +108,9 @@ Latency is real. Networks partition. Models have context windows. Memory evicts.
 - Treat model uncertainty as evidence against Casey
 - Erase experience or requirements because proof is not yet indexed
 - Upgrade an institutional title or convention into automatic truth
+- Rewrite a target downward because current code is incomplete
+- Treat a blocked current path as proof the aspiration should disappear
+- Let public calibration feed backward into weaker private ambition
 
 ---
 
@@ -89,6 +121,14 @@ A new engineer reads ARCHITECTURE.md and understands the full system topology in
 If that stops being true, we've drifted. The fix is not a longer onboarding doc. The fix is to simplify whatever made the system harder to understand.
 
 The system must also be able to show how Casey's assertion moved from operator statement to inspected evidence, implementation, native verification, and durable receipt. If that chain is missing, the work is unfinished.
+
+For aspirational systems, the system must separately show:
+
+```text
+VISION -> TARGET -> GAP -> CURRENT PATH -> IMPLEMENTATION -> VERIFICATION
+```
+
+A gap is development work. It is not permission to delete the vision.
 
 ---
 
