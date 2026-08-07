@@ -1,0 +1,61 @@
+name: One-shot PostCSS lock security synthesis
+
+on:
+  push:
+    branches:
+      - synthesize/postcss-lock-security-20260807
+
+permissions:
+  contents: write
+
+concurrency:
+  group: postcss-lock-refresh-once-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  synthesize:
+    if: github.ref == 'refs/heads/synthesize/postcss-lock-security-20260807'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact synthesis branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: synthesize/postcss-lock-security-20260807
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Regenerate lockfile from current canonical package contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/postcss-lock-refresh-once.yml
+          npm update postcss --package-lock-only --ignore-scripts
+          node - <<'NODE'
+          const lock = require('./package-lock.json');
+          const entry = lock.packages?.['node_modules/postcss'];
+          if (!entry || entry.version !== '8.5.25') {
+            throw new Error(`expected postcss 8.5.25, got ${entry?.version ?? 'missing'}`);
+          }
+          NODE
+
+      - name: Verify native JavaScript contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts
+          npm test
+          npm run typecheck
+          npm run build
+          git diff --check
+          git diff --exit-code -- package.json
+
+      - name: Commit regenerated lockfile and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'chore(deps): synthesize PostCSS 8.5.25 lock security update'
+          git push origin HEAD:synthesize/postcss-lock-security-20260807
