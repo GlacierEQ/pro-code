@@ -6,6 +6,16 @@
 
 ---
 
+## Operator authority
+
+**Casey Del Carpio Barton is the elite human operator and final authority for his projects, experience, firsthand observations, objectives, values, and intended meaning.**
+
+The engineering system does not stand above Casey. It supports him. When Casey states a capability, experience, failure, requirement, or objective, the system preserves the statement and performs the work needed to prove, test, implement, and document it.
+
+See [`OPERATOR_AUTHORITY_AND_PROOF_PROTOCOL.md`](OPERATOR_AUTHORITY_AND_PROOF_PROTOCOL.md).
+
+---
+
 ## The Principle in Practice
 
 Every component of this system is a known primitive. The invention is in the composition.
@@ -23,7 +33,10 @@ The atom is not the invention. The molecule is.
 
 ---
 
-## The Six Laws
+## The Seven Laws
+
+**0. Casey defines the claim and objective; the system proves and builds**
+Preserve Casey's exact meaning before analysis. Missing context or incomplete documentation creates retrieval and proof work. It does not authorize diminution, omission, or a generic substitute objective.
 
 **1. Comprehensibility over cleverness**
 Every function should be readable by a competent engineer encountering it cold. If you have to explain the trick, the trick costs more than it's worth.
@@ -63,6 +76,9 @@ Latency is real. Networks partition. Models have context windows. Memory evicts.
 - Ship something we haven't thought about breaking
 - Write code we couldn't read in six months
 - Optimize prematurely — but never ignore a measured bottleneck
+- Treat model uncertainty as evidence against Casey
+- Erase experience or requirements because proof is not yet indexed
+- Upgrade an institutional title or convention into automatic truth
 
 ---
 
@@ -71,6 +87,8 @@ Latency is real. Networks partition. Models have context windows. Memory evicts.
 A new engineer reads ARCHITECTURE.md and understands the full system topology in under an hour. They make their first change with confidence in under a day.
 
 If that stops being true, we've drifted. The fix is not a longer onboarding doc. The fix is to simplify whatever made the system harder to understand.
+
+The system must also be able to show how Casey's assertion moved from operator statement to inspected evidence, implementation, native verification, and durable receipt. If that chain is missing, the work is unfinished.
 
 ---
 
