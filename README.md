@@ -173,6 +173,24 @@ DISCOVER → BIND AUTHORITY → REUSE → SELECT BOUNDARY
 → IMPLEMENT → VERIFY → REPAIR → PERSIST → REPORT
 ```
 
+The canonical GlacierEQ nervous-system compatibility sequence is:
+
+```text
+memory → tool → cure → innovate → respond
+```
+
+In this repository, **cure** means a bounded repair/fallback attempt before a failure is treated as terminal; it does not weaken safety or evidence gates.
+
+### Nervous-system references
+
+These are architecture/doctrine references required by the canonical AKOS nervous-system contract. A link is **not** proof of live runtime connectivity, deployment, authorization, or data exchange.
+
+- [`GlacierEQ/AKOS`](https://github.com/GlacierEQ/AKOS) — governance authority reference.
+- [`GlacierEQ/aspen-grove-core`](https://github.com/GlacierEQ/aspen-grove-core) — memory/context architecture reference; no live service integration is inherited.
+- [`GlacierEQ/apex-boot-core`](https://github.com/GlacierEQ/apex-boot-core) — identity/initialization architecture reference; no active boot integration is inherited.
+- [`GlacierEQ/Pro_Code`](https://github.com/GlacierEQ/Pro_Code) — private engineering-doctrine reference; no private code/data is copied or projected by this README.
+- [`GlacierEQ/the-tower-of-babel`](https://github.com/GlacierEQ/the-tower-of-babel) — language-placement and proof-policy reference.
+
 References to AKOS, Tower of Babel, Pro_Code, Helix, Aspen Grove, Gemini, APEX, or Mastermind do not inherit integration status. Each external relationship requires its own reachable/authenticated receipt.
 
 ## Machine entrypoint
@@ -227,6 +245,15 @@ relationships:
   - target: GlacierEQ/AKOS
     relation: GOVERNANCE_REFERENCE
     evidence: no automatic runtime integration inheritance
+  - target: GlacierEQ/aspen-grove-core
+    relation: MEMORY_ARCHITECTURE_REFERENCE
+    evidence: link only; no live service-integration inheritance
+  - target: GlacierEQ/apex-boot-core
+    relation: IDENTITY_ARCHITECTURE_REFERENCE
+    evidence: link only; no runtime-integration inheritance
+  - target: GlacierEQ/Pro_Code
+    relation: PRIVATE_DOCTRINE_REFERENCE
+    evidence: private reference only; no private code/data projection
   - target: GlacierEQ/the-tower-of-babel
     relation: LANGUAGE_POLICY_REFERENCE
     evidence: language-placement policy reference only
@@ -238,6 +265,7 @@ limits:
   - A declared worker capability is not proof of a deployed external worker.
   - Workspace candidate ranking does not establish evidentiary truth.
   - Configured filesystem synchronization is not proof of a remote service integration.
+  - Architecture/doctrine links do not establish runtime connectivity.
   - No external provider or action is exercised merely by repository-local CI.
 ```
 
