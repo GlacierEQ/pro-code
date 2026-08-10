@@ -1,0 +1,9 @@
+{
+  "schema": "glaciereq.elite-leaf-gap.v1",
+  "repository": "GlacierEQ/pro-code",
+  "at": "2026-08-10T04:33Z",
+  "blocker": "MISSING_SRC_OR_TESTS",
+  "evidence": "leaves/pro-code/",
+  "not_promoted_reason": "has_src=False has_tests=True",
+  "principal_state_claim": null
+}
