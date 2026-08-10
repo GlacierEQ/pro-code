@@ -3,5 +3,13 @@
   "repository": "GlacierEQ/pro-code",
   "role": "governed_engineering_execution",
   "canonical_manifest": "GlacierEQ/AKOS/governance/glaciereq.nervous-system.v1.json",
-  "operating_sequence": ["memory", "tool", "cure", "innovate", "respond"]
+  "operating_sequence": ["memory", "tool", "cure", "innovate", "respond"],
+  "relationships": [
+    {
+      "target": "GlacierEQ/computer-user",
+      "relation": "COMPUTER_EXECUTION_KERNEL",
+      "boundary": "pro-code owns engineering operator/runtime intent and local engineering work; computer-user owns governed computer/browser/native execution when that boundary is invoked."
+    }
+  ],
+  "runtime_integration_claimed": false
 }
