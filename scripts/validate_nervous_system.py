@@ -24,7 +24,17 @@ else:
  for link in node.get('required_links',[]):
   if link.lower() not in readme: errors.append(f'README missing link: {link}')
 
-relationships=contract.get('relationships') or []
+raw_relationships=contract.get('relationships') or []
+if not isinstance(raw_relationships,list):
+ errors.append('relationships must be a list')
+ relationships=[]
+else:
+ relationships=[]
+ for index,item in enumerate(raw_relationships):
+  if not isinstance(item,dict):
+   errors.append(f'relationships[{index}] must be an object')
+   continue
+  relationships.append(item)
 kernel=[item for item in relationships if item.get('target')=='GlacierEQ/computer-user']
 if len(kernel)!=1:
  errors.append('computer-user kernel relationship must appear exactly once')
