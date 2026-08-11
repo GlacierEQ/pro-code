@@ -1,0 +1,48 @@
+{
+  "schema": "glaciereq.pro-code.computer-kernel-live-receipt.v1",
+  "status": "PASS",
+  "repository": "GlacierEQ/pro-code",
+  "pro_code_source_sha": "c6cbfc8c01db6533c163148457908b03f76e5461",
+  "kernel": {
+    "repository": "GlacierEQ/computer-user",
+    "canonical_main_sha": "47de3e53dbf8f9bd10421a6b54a269e035a4b783",
+    "tested_source_sha": "b6aa44b9d90fee4c9c935d958574e6fca0b17680",
+    "executor": "GlacierEQ/computer-user"
+  },
+  "akos": {
+    "repository": "GlacierEQ/AKOS",
+    "source_sha": "eac3cab001306225b99da41c37370528331966dd",
+    "acceptance_status": "VERIFIED"
+  },
+  "invocation": {
+    "caller": "GlacierEQ/pro-code",
+    "capability": "kernel.health",
+    "trace_id": "pro-code-live-c6cbfc8c01-eac3cab001-b6aa44b9d9",
+    "task_id": "06fc387c-90ed-4671-ac65-ed913ce26a97",
+    "execution_result": "completed",
+    "verification_result": "PASS",
+    "receipt_sha256": "277c69fbdbc3a877bdbe3d69267d5fcecc682a56d38d309dd4da3bf8c641f7a6",
+    "caller_bound": true,
+    "trace_bound": true,
+    "capability_bound": true,
+    "terminal_source_sha_bound": true,
+    "receipt_hash_bound": true
+  },
+  "governed_public_action": {
+    "job_id": "computer-user-pro-code-hardened-final-20260811-2125z",
+    "workflow_run_id": "31537976922",
+    "public_runner_sha": "6700a674ee2c6a52877f1a4023584bc635a67ce3",
+    "result_status": "completed"
+  },
+  "canonical_kernel_proof": {
+    "path": "GlacierEQ/computer-user/machine/pro-code-originated-live-receipt-proof.json",
+    "hardened_behavioral_receipt_sha256": "a0884186349595983e191f9a357adabdd4ec98a54c5aae54d5fb42d2a2d92b71",
+    "hardened_behavioral_tested_source_sha": "5881b9fc6c57599d059432499098fdf3636b7eb4"
+  },
+  "truth_boundary": {
+    "runtime_integration_verified": true,
+    "persistent_production_host_verified": false,
+    "production_deployed": false,
+    "production_claim_requires": "credentialed persistent host + supervised activation + canonical AKOS readback + restart receipt persistence"
+  }
+}
