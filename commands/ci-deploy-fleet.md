@@ -1,149 +1,58 @@
 ---
-description: Deploy Spiral Engine CI workflow to multiple private repos in batch.
+description: Keep private-repository CI off private GitHub-hosted runner budgets and route verification through the APEX public action face.
 ---
 
 # CI Deploy Fleet
 
-Deploy self-hosted CI to multiple repos with one command.
+## Governing invariant
 
-## Usage
+**Private repositories do not run automatic GitHub-hosted CI.**
 
-```
-ci-deploy-fleet [REPOS...] [--lang python|typescript|go] [--dry-run] [--upgrade]
-```
+A reusable workflow called from a private repository is still private Actions execution for billing/limits. Therefore `push` and `pull_request` workflows in private repositories must not call `ubuntu-latest` or the reusable public runner as their normal verification path.
 
-## Examples
+Automatic verification executes from:
 
-```bash
-# Deploy Python CI to specific repos
-ci-deploy-fleet Pro-xAI colossus-gateway mastermind --lang python
+`GlacierEQ/public-actions-runner-host`
 
-# Deploy to all Pro repos
-ci-deploy-fleet Pro-* --lang python
+The public action face must:
 
-# Dry run first
-ci-deploy-fleet Pro-xAI apex-alpha --dry-run
+1. receive a bounded action job;
+2. mint short-lived repository-scoped credentials through OIDC/Keymaster;
+3. checkout the exact private source SHA without persisting credentials;
+4. execute the catalog-approved validator in isolation;
+5. verify the workload/result relationship;
+6. publish an immutable detailed result to the private control plane; and
+7. revoke workload and control tokens.
 
-# Upgrade existing ubuntu-latest to self-hosted
-ci-deploy-fleet Pro-xAI Pro-Colossus --upgrade
+Private `.github/workflows/ci.yml` files are retained only as **manual recovery** surfaces using `workflow_dispatch`.
 
-# Deploy to all Python repos
-ci-deploy-fleet --all-python
+## Fleet repair
 
-# Deploy to all TypeScript repos
-ci-deploy-fleet --all-typescript
-```
-
-## Implementation
+Use the canonical installer:
 
 ```bash
-#!/bin/bash
-# ci-deploy-fleet.sh — Batch CI deployment
-set -euo pipefail
-
-REPOS=()
-LANG_OVERRIDE=""
-DRY_RUN=false
-UPGRADE=false
-ALL_PYTHON=false
-ALL_TYPESCRIPT=false
-
-while [[ $# -gt 0 ]]; do
-  case $1 in
-    --lang) LANG_OVERRIDE="$2"; shift 2 ;;
-    --dry-run) DRY_RUN=true; shift ;;
-    --upgrade) UPGRADE=true; shift ;;
-    --all-python) ALL_PYTHON=true; shift ;;
-    --all-typescript) ALL_TYPESCRIPT=true; shift ;;
-    *) REPOS+=("$1"); shift ;;
-  esac
-done
-
-export GITHUB_TOKEN="${GITHUB_TOKEN:-$(grep oauth_token ~/.config/gh/hosts.yml | head -1 | awk '{print $2}')}"
-
-if $ALL_PYTHON; then
-  REPOS=($(gh repo list GlacierEQ --limit 500 --json name,primaryLanguage -q '.[] | select(.primaryLanguage?.name == "Python") | .name'))
-fi
-if $ALL_TYPESCRIPT; then
-  REPOS=($(gh repo list GlacierEQ --limit 500 --json name,primaryLanguage -q '.[] | select(.primaryLanguage?.name == "TypeScript") | .name'))
-fi
-
-SUCCESS=0; FAIL=0; SKIP=0
-
-for repo in "${REPOS[@]}"; do
-  # Detect language
-  if [ -n "$LANG_OVERRIDE" ]; then
-    LANG="$LANG_OVERRIDE"
-  else
-    LANG=$(gh repo list GlacierEQ --limit 1 --json name,primaryLanguage -q ".[] | select(.name == \"$repo\") | .primaryLanguage?.name // \"python\"" 2>/dev/null)
-    case "$LANG" in
-      Python) LANG="python" ;;
-      TypeScript) LANG="typescript" ;;
-      Go) LANG="go" ;;
-      *) LANG="python" ;;
-    esac
-  fi
-
-  # Check if CI exists
-  EXISTS=$(gh api repos/GlacierEQ/$repo/contents/.github/workflows/ci.yml --jq '.sha' 2>/dev/null)
-  if [ -n "$EXISTS" ] && ! $UPGRADE; then
-    echo "⏭️  $repo (already has CI)"
-    ((SKIP++))
-    continue
-  fi
-
-  # Check default branch
-  DEFAULT=$(gh api repos/GlacierEQ/$repo --jq '.defaultBranch // "main"' 2>/dev/null)
-
-  WF="name: CI
-
-on:
-  push:
-    branches: [$DEFAULT, develop]
-  pull_request:
-    branches: [$DEFAULT]
-
-jobs:
-  ci:
-    uses: GlacierEQ/public-actions-runner-host/.github/workflows/reusable-quick-ci.yml@main
-    with:
-      repo_name: \${{ github.event.repository.name }}
-      language: $LANG"
-
-  if $DRY_RUN; then
-    echo "  → Would deploy $LANG CI to $repo (branch: $DEFAULT)"
-    ((SUCCESS++))
-    continue
-  fi
-
-  ENCODED=$(echo "$WF" | python3 -c "import sys,base64; print(base64.b64encode(sys.stdin.read().encode()).decode())")
-
-  if [ -n "$EXISTS" ]; then
-    RESULT=$(gh api "repos/GlacierEQ/$repo/contents/.github/workflows/ci.yml" \
-      -X PUT -f message="ci: upgrade to Spiral Engine self-hosted CI" \
-      -f content="$ENCODED" -f sha="$EXISTS" -f branch="$DEFAULT" 2>&1)
-  else
-    RESULT=$(gh api "repos/GlacierEQ/$repo/contents/.github/workflows/ci.yml" \
-      -X PUT -f message="ci: add Spiral Engine self-hosted CI" \
-      -f content="$ENCODED" -f branch="$DEFAULT" 2>&1)
-  fi
-
-  if echo "$RESULT" | grep -q '"sha"'; then
-    echo "✅ $repo ($LANG)"
-    ((SUCCESS++))
-  else
-    echo "❌ $repo"
-    ((FAIL++))
-  fi
-done
-
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "✅ Deployed: $SUCCESS | ⏭️ Skipped: $SKIP | ❌ Failed: $FAIL"
+ci/templates/setup-repo-ci.sh repo-a repo-b repo-c
 ```
 
-## Evidence
+Preview first when operating on an unfamiliar repository:
 
-- Performed this session across 27 repos (26 success, 1 retry)
-- Repeated pattern: `for repo in ... gh api repos/GlacierEQ/$repo/contents/.github/workflows/ci.yml`
-- Saves ~500 tokens per batch deployment vs manual construction
+```bash
+ci/templates/setup-repo-ci.sh repo-a repo-b --dry-run
+```
+
+The installer now creates or replaces only a `workflow_dispatch` recovery workflow. It deliberately does **not** add automatic private `push`/`pull_request` triggers.
+
+## Verification rule
+
+A private repository is considered migrated only when all of the following hold:
+
+- its automatic private hosted-runner trigger is absent;
+- its branch protection does not depend on a retired private check, or the dependency has an approved replacement;
+- the public action catalog authorizes the repository/action;
+- Keymaster can mint only the bounded repository token required for the action;
+- an exact-SHA public execution completes; and
+- the immutable private result receipt matches that SHA.
+
+## Proven reference
+
+`GlacierEQ/computer-user` established the reference path on 2026-08-11: the public action face validated exact private SHA `d2a7e48a744a36c50da8960a11aafef563a8cc97`, with 130 bounded-Smithery tests passing and Ruff clean, while the corresponding private automatic workflows were retired without spawning private Actions runs.
