@@ -1,20 +1,26 @@
-# ═══════════════════════════════════════════════════════════════
-# GlacierEQ APEX — CI Template for Private Repos
-# ═══════════════════════════════════════════════════════════════
-# Copy this file to: .github/workflows/ci.yml in your private repo
-# Code stays private — runner executes from public-actions-runner-host
-# ═══════════════════════════════════════════════════════════════
+# GlacierEQ APEX — Private Repository CI Recovery Template
+#
+# IMPORTANT:
+# Automatic verification for private repositories MUST execute from
+# GlacierEQ/public-actions-runner-host through the governed public action face.
+# A reusable workflow invoked by a private caller is billed/limited as private
+# Actions execution and can be blocked by the private Actions budget.
+#
+# This file is therefore MANUAL RECOVERY ONLY. Do not add push/pull_request
+# triggers here. Automatic CI belongs in the public action face with exact-SHA
+# private checkout, OIDC/Keymaster credentials, immutable result publication,
+# and post-run token revocation.
 
-name: CI
+name: Legacy Private CI - Manual Recovery Only
 
 on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  ci:
+  legacy-manual-ci:
     uses: GlacierEQ/public-actions-runner-host/.github/workflows/reusable-quick-ci.yml@main
     with:
       repo_name: ${{ github.event.repository.name }}
