@@ -48,6 +48,13 @@ observation → verification → receipt
 
 Machine truth is recorded in `.glaciereq/computer-kernel.live-receipt.json` and `.glaciereq/nervous-system.node.json`.
 
+Two proof stages are intentionally preserved and serve different purposes:
+
+1. **Hardened behavioral proof.** Before the final machine-state projection, computer-user head `5881b9fc6c57599d059432499098fdf3636b7eb4` passed the strengthened 203-test gate after review added explicit capability and source-SHA binding. Its Pro-Code-originated behavioral receipt is `a0884186349595983e191f9a357adabdd4ec98a54c5aae54d5fb42d2a2d92b71`. This pair is the independent behavioral evidence stored canonically by computer-user in `machine/pro-code-originated-live-receipt-proof.json`.
+2. **Final merge-guard proof.** After the earned machine projection was added, exact head `b6aa44b9d90fee4c9c935d958574e6fca0b17680` reran the entire 203-test transaction unchanged and returned receipt `277c69fbdbc3a877bdbe3d69267d5fcecc682a56d38d309dd4da3bf8c641f7a6`. This proves the projection-only delta did not invalidate behavior and is the receipt used for Pro-Code's local runtime-integration claim.
+
+The two hash pairs are therefore complementary, not competing: the **behavioral proof** establishes the mechanism before projection, and the **merge-guard proof** proves the frozen post-projection head still reproduces the mechanism. Both pairs are pinned by `scripts/validate_nervous_system.py` so either drifting causes the contract gate to fail.
+
 The final merge-guard proof used:
 
 - computer-user tested head: `b6aa44b9d90fee4c9c935d958574e6fca0b17680`
