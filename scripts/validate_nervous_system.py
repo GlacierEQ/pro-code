@@ -56,7 +56,7 @@ else:
  text=doc.read_text(encoding='utf-8')
  for required in (
   'fe61227a97071c1bd3146f87b9bb0849874f844e',
-  '079956542500fcfcdf161e88ed81c73e770de49d',
+  'eac3cab001306225b99da41c37370528331966dd',
   'production deployment remains false',
   'issue #20',
  ):
@@ -72,6 +72,7 @@ print(json.dumps({
  'role':node['role'],
  'manifest_version':manifest['version'],
  'computer_execution_kernel':'verified',
+ 'canonical_akos_sha':'eac3cab001306225b99da41c37370528331966dd',
  'pro_code_live_invocation_receipt':False,
  'persistent_production_host_verified':False,
 },indent=2))
