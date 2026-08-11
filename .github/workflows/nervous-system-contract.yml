@@ -2,9 +2,9 @@ name: Nervous System Contract
 on:
   push:
     branches: [main]
-    paths: [README.md, .glaciereq/nervous-system.node.json, docs/COMPUTER_EXECUTION_KERNEL.md, scripts/validate_nervous_system.py, .github/workflows/nervous-system-contract.yml]
+    paths: [README.md, .glaciereq/nervous-system.node.json, .glaciereq/computer-kernel.live-receipt.json, docs/COMPUTER_EXECUTION_KERNEL.md, scripts/validate_nervous_system.py, .github/workflows/nervous-system-contract.yml]
   pull_request:
-    paths: [README.md, .glaciereq/nervous-system.node.json, docs/COMPUTER_EXECUTION_KERNEL.md, scripts/validate_nervous_system.py, .github/workflows/nervous-system-contract.yml]
+    paths: [README.md, .glaciereq/nervous-system.node.json, .glaciereq/computer-kernel.live-receipt.json, docs/COMPUTER_EXECUTION_KERNEL.md, scripts/validate_nervous_system.py, .github/workflows/nervous-system-contract.yml]
   workflow_dispatch:
 permissions:
   contents: read
