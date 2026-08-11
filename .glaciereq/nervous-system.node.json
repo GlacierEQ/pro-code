@@ -9,12 +9,19 @@
       "target": "GlacierEQ/computer-user",
       "relation": "COMPUTER_EXECUTION_KERNEL",
       "boundary": "pro-code owns engineering operator/runtime intent and local engineering work; computer-user owns governed computer/browser/native execution when that boundary is invoked.",
-      "kernel_main_sha": "fe61227a97071c1bd3146f87b9bb0849874f844e",
+      "kernel_main_sha": "47de3e53dbf8f9bd10421a6b54a269e035a4b783",
       "kernel_runtime_integration_proven": true,
       "persistent_host_activation_contract_verified": true,
       "persistent_production_host_verified": false,
-      "pro_code_live_invocation_receipt": false
+      "pro_code_live_invocation_receipt": true,
+      "live_receipt_proof": ".glaciereq/computer-kernel.live-receipt.json",
+      "live_receipt_tested_kernel_sha": "b6aa44b9d90fee4c9c935d958574e6fca0b17680",
+      "live_receipt_sha256": "277c69fbdbc3a877bdbe3d69267d5fcecc682a56d38d309dd4da3bf8c641f7a6",
+      "live_receipt_capability": "kernel.health",
+      "live_receipt_akos_sha": "eac3cab001306225b99da41c37370528331966dd",
+      "live_receipt_workflow_run_id": "31537976922"
     }
   ],
-  "runtime_integration_claimed": false
+  "runtime_integration_claimed": true,
+  "production_deployment_claimed": false
 }
