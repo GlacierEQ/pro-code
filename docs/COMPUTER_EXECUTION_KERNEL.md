@@ -4,14 +4,18 @@
 
 ## Current canonical state
 
-- Computer-user canonical main: `fe61227a97071c1bd3146f87b9bb0849874f844e`.
+- Computer-user canonical main: `47de3e53dbf8f9bd10421a6b54a269e035a4b783`.
 - Canonical AKOS main: `eac3cab001306225b99da41c37370528331966dd`.
+- Canonical Pro-Code main used as the originator: `c6cbfc8c01db6533c163148457908b03f76e5461`.
 - AKOS → running-kernel HTTP invocation and receipt acceptance are proven.
-- AKOS now preserves and independently verifies delegated caller identity, allowing Pro-Code to remain the truthful receipt originator while AKOS remains the governor/verifier.
-- Real Chromium/Puppeteer `browser.navigate` target readback is proven in the governed container runner.
-- Durable task/receipt state survives verified container replacement.
+- AKOS preserves and independently verifies delegated caller identity, allowing Pro-Code to remain the truthful receipt originator while AKOS remains the governor/verifier.
+- A Pro-Code-originated live `kernel.health` invocation is now proven. The final merge-guard transaction executed computer-user head `b6aa44b9d90fee4c9c935d958574e6fca0b17680` and returned receipt `277c69fbdbc3a877bdbe3d69267d5fcecc682a56d38d309dd4da3bf8c641f7a6` with caller `GlacierEQ/pro-code`, executor `GlacierEQ/computer-user`, capability `kernel.health`, and AKOS acceptance `VERIFIED`.
+- The final originator proof passed 203 tests and bound caller, trace, requested capability, receipt hash, and the terminal receipt source SHA to the exact executed kernel head.
+- Real Chromium/Puppeteer `browser.navigate` target readback remains proven in the governed container runner, and durable task/receipt state survives verified container replacement.
 - Persistent-host systemd activation and canonical-AKOS restart/readback contracts are implemented and test-verified.
 - A credentialed resident production host has not yet been reached; production deployment remains false.
+
+The canonical computer-user merge SHA is a repository-state pointer. The live receipt is correctly bound to the exact reviewed pre-merge head that was executed by the governed runner; the merge SHA is **not** presented as the source that generated that receipt.
 
 ## Responsibility split
 
@@ -32,12 +36,28 @@ observation → verification → receipt
 ## Contract
 
 - Pro-Code owns engineering intent, operator state, local engineering dispatch, and repository-native engineering proof.
-- AKOS owns governing authority and receipt acceptance.
+- AKOS owns governing authority and independent receipt acceptance.
 - `computer-user` owns the governed computer-action boundary, capability/adapter selection, durable execution, target-state verification, and execution receipts.
 - Pro-Code may consume kernel receipts without duplicating browser/computer-control authority.
 - Pro-Code dispatch envelopes identify `GlacierEQ/pro-code` as the caller; canonical AKOS verifies that identity rather than rewriting it.
-- The kernel's runtime is proven, but Pro-Code itself does **not** claim a live invocation until a Pro-Code-originated request is bound to an exact kernel receipt.
-- Production deployment is not inferred from container CI. It requires the persistent-host AKOS restart/readback gate to pass on a credentialed resident host.
+- Pro-Code now **does** claim live runtime integration because a Pro-Code-originated request is bound to an exact terminal kernel receipt and independently accepted by canonical AKOS.
+- This runtime-integration claim is not a production-deployment claim. The verified transaction used a governed ephemeral loopback integration runner.
+- Production deployment is not inferred from CI or container execution. It requires the persistent-host AKOS restart/readback gate to pass on a credentialed resident host.
+
+## Proof record
+
+Machine truth is recorded in `.glaciereq/computer-kernel.live-receipt.json` and `.glaciereq/nervous-system.node.json`.
+
+The final merge-guard proof used:
+
+- computer-user tested head: `b6aa44b9d90fee4c9c935d958574e6fca0b17680`
+- computer-user canonical merge: `47de3e53dbf8f9bd10421a6b54a269e035a4b783`
+- Pro-Code originator: `c6cbfc8c01db6533c163148457908b03f76e5461`
+- AKOS verifier: `eac3cab001306225b99da41c37370528331966dd`
+- governed public workflow run: `31537976922`
+- Pro-Code receipt: `277c69fbdbc3a877bdbe3d69267d5fcecc682a56d38d309dd4da3bf8c641f7a6`
+- tests: `203 PASS`
+- production deployment: `false`
 
 ## Current external gate
 
@@ -46,7 +66,7 @@ The remaining production blocker is tracked in `GlacierEQ/computer-user` issue #
 ## Canonical references
 
 - `GlacierEQ/AKOS` — governance, delegated-caller verification, and receipt acceptance.
-- `GlacierEQ/computer-user` — governed computer execution kernel.
+- `GlacierEQ/computer-user` — governed computer execution kernel and canonical originator proof.
 - `GlacierEQ/monolith` — estate map and proven-relationship projection.
 - `GlacierEQ/Pro_Code` — private engineering doctrine.
 
