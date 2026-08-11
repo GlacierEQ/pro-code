@@ -1,10 +1,14 @@
 #!/bin/bash
-# ═══════════════════════════════════════════════════════════════
-# Batch-add CI workflow to private repos
-# Usage: ./setup-repo-ci.sh <repo1> [repo2] [repo3] ...
-#    or: ./setup-repo-ci.sh --all-python    (all Python repos)
-#    or: ./setup-repo-ci.sh --dry-run       (preview only)
-# ═══════════════════════════════════════════════════════════════
+# GlacierEQ APEX — install/repair PRIVATE CI fallback workflows.
+#
+# Automatic private-repository verification executes from
+# GlacierEQ/public-actions-runner-host. This installer intentionally creates a
+# workflow_dispatch-only recovery workflow so a private caller can never make
+# GitHub-hosted Actions budget a normal CI dependency.
+#
+# Usage: ./setup-repo-ci.sh <repo1> [repo2] ...
+#        ./setup-repo-ci.sh --all-python
+#        ./setup-repo-ci.sh --dry-run
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,7 +16,6 @@ DRY_RUN=false
 LANG_OVERRIDE=""
 REPOS=()
 
-# Parse args
 while [[ $# -gt 0 ]]; do
   case $1 in
     --dry-run) DRY_RUN=true; shift ;;
@@ -34,33 +37,34 @@ if [ ${#REPOS[@]} -eq 0 ]; then
   exit 1
 fi
 
-TEMPLATE="name: CI
+TEMPLATE='name: Legacy Private CI - Manual Recovery Only
 
+# Automatic CI is executed from GlacierEQ/public-actions-runner-host.
+# Do not add push/pull_request triggers to this private-repository fallback.
 on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  ci:
+  legacy-manual-ci:
     uses: GlacierEQ/public-actions-runner-host/.github/workflows/reusable-quick-ci.yml@main
     with:
-      repo_name: \${{ github.event.repository.name }}
-      language: LANG_PLACEHOLDER"
+      repo_name: ${{ github.event.repository.name }}
+      language: LANG_PLACEHOLDER'
 
 SUCCESS=0
 FAIL=0
 
 for repo in "${REPOS[@]}"; do
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo "📦 $repo"
+  echo "------------------------------------------"
+  echo "$repo"
 
-  # Detect language
   if [ -n "$LANG_OVERRIDE" ]; then
     LANG="$LANG_OVERRIDE"
   else
-    LANG=$(gh repo list GlacierEQ --limit 1 --json name,primaryLanguage -q ".[] | select(.name == \"$repo\") | .primaryLanguage?.name // \"python\"" 2>/dev/null)
+    LANG=$(gh repo list GlacierEQ --limit 500 --json name,primaryLanguage -q ".[] | select(.name == \"$repo\") | .primaryLanguage?.name // \"python\"" 2>/dev/null)
     case "$LANG" in
       Python) LANG="python" ;;
       TypeScript) LANG="typescript" ;;
@@ -69,32 +73,36 @@ for repo in "${REPOS[@]}"; do
     esac
   fi
 
-  WF_CONTENT=$(echo "$TEMPLATE" | sed "s/LANG_PLACEHOLDER/$LANG/g")
+  WF_CONTENT=$(printf '%s\n' "$TEMPLATE" | sed "s/LANG_PLACEHOLDER/$LANG/g")
 
   if [ "$DRY_RUN" = true ]; then
-    echo "  → Would create .github/workflows/ci.yml (lang: $LANG)"
+    echo "  would install manual-only private fallback (lang: $LANG)"
     ((SUCCESS++))
     continue
   fi
 
-  # Create via GitHub API
-  ENCODED=$(echo "$WF_CONTENT" | python3 -c "import sys,base64; print(base64.b64encode(sys.stdin.read().encode()).decode())")
+  DEFAULT=$(gh api "repos/GlacierEQ/$repo" --jq '.default_branch')
+  EXISTING_SHA=$(gh api "repos/GlacierEQ/$repo/contents/.github/workflows/ci.yml?ref=$DEFAULT" --jq '.sha' 2>/dev/null || true)
+  ENCODED=$(printf '%s\n' "$WF_CONTENT" | python3 -c "import sys,base64; print(base64.b64encode(sys.stdin.read().encode()).decode())")
 
-  RESULT=$(gh api "repos/GlacierEQ/$repo/contents/.github/workflows/ci.yml" \
-    -X PUT \
-    -f message="ci: add self-hosted CI pipeline" \
-    -f content="$ENCODED" \
-    -f branch="main" 2>&1)
+  args=(
+    -X PUT
+    -f message="ci: retire automatic private runner execution"
+    -f content="$ENCODED"
+    -f branch="$DEFAULT"
+  )
+  if [ -n "$EXISTING_SHA" ]; then
+    args+=(-f sha="$EXISTING_SHA")
+  fi
 
-  if echo "$RESULT" | grep -q '"sha"'; then
-    echo "  ✅ CI workflow created (lang: $LANG)"
+  if gh api "repos/GlacierEQ/$repo/contents/.github/workflows/ci.yml" "${args[@]}" >/dev/null; then
+    echo "  installed manual-only fallback; automatic CI must use public action face"
     ((SUCCESS++))
   else
-    echo "  ❌ Failed: $RESULT"
+    echo "  failed"
     ((FAIL++))
   fi
 done
 
 echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "✅ Success: $SUCCESS | ❌ Failed: $FAIL"
+echo "Success: $SUCCESS | Failed: $FAIL"
