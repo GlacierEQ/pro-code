@@ -43,7 +43,8 @@ class OperatorFidelityContractTests(unittest.TestCase):
         text = AUTHORITY.read_text(encoding="utf-8").lower()
         self.assertIn("casey del carpio barton is the elite human operator", text)
         self.assertIn("unresolved_gap", text)
-        self.assertIn("system is subordinate", text)
+        self.assertIn("subordinate instruments", text)
+        self.assertIn("they do not outrank casey", text)
 
 
 if __name__ == "__main__":
