@@ -1,20 +1,56 @@
 {
   "policy_name": "pro-code Mastermind Sidecar Hooks",
   "repo": "GlacierEQ/pro-code",
-  "phase": "phase_1a_hidden_substrate",
-  "last_updated": "2026-06-23",
-  "mastermind_doctrine": "GlacierEQ/Pro-Mastermind",
-  "mastermind_runtime": "GlacierEQ/mastermind",
-  "sidecar_role": "runtime_improvement_agent",
-  "read_targets": ["README.md", "KNOWLEDGE.md", "src/workers.ts", "src/memory.ts", "ci/", ".apex/repo-profile.json", ".helix/strand.json", ".aspen/grove-sync-policy.json", ".pistons/worker-registry.json"],
-  "write_targets_allowed": [".audit/", ".mastermind/", "docs/", "tests/", "ci/"],
-  "write_targets_restricted": ["src/workers.ts", "src/memory.ts", "package.json", "vite.config.*"],
-  "required_review_for_restricted_targets": true,
-  "loop": {
-    "observe": "read runtime health, CI state, worker drift, and repo substrate",
-    "orient": "compare against Pro_Code doctrine and Aspen Grove registry",
-    "decide": "draft minimal patch proposal with risk classification",
-    "act": "write only on feature branches unless explicitly authorized"
+  "phase": "maximum_coherent_capability",
+  "last_updated": "2026-08-17",
+  "project_authority": "current human Operator intent",
+  "engineering_standard": "PRO_CODE_ELITE_HUMANIZED_ENGINEERED",
+  "mastermind_doctrine": "GlacierEQ/Pro-Mastermind as specialist engineering input",
+  "mastermind_runtime": "GlacierEQ/mastermind as optional runtime collaborator",
+  "sidecar_role": "runtime_capability_improvement_agent",
+  "read_targets": [
+    "README.md",
+    "KNOWLEDGE.md",
+    "src/",
+    "tests/",
+    "ci/",
+    ".apex/",
+    ".helix/",
+    ".aspen/",
+    ".pistons/",
+    "relevant history branches predecessors and sibling capability donors"
+  ],
+  "write_policy": {
+    "rule": "When the Operator requests implementation or repair and the repository/tool authorization permits it, write the strongest coherent capability delta across every material in-repo surface required for correctness. Do not artificially limit changes to documentation, tests, CI, or feature branches merely to minimize blast radius.",
+    "impact_aware_surfaces": [
+      "src/",
+      "package.json",
+      "build/runtime configuration",
+      "public interfaces",
+      "persistence schemas",
+      "security boundaries"
+    ],
+    "impact_rule": "High-impact surfaces require deeper dependency, regression, migration, security, and rollback/recovery analysis proportional to the actual risk. They do not require a separate model-generated permission ritual when already within the Operator's authorized task.",
+    "branch_rule": "Use a feature branch, worktree, or direct current-branch mutation according to repository collaboration needs, review requirements, and Operator direction. Branch choice is an execution mechanic, not a capability ceiling."
   },
-  "blocked_actions": ["direct_main_mutation_without_authorization", "raw_secret_write", "raw_sensitive_record_write", "destructive_history_rewrite"]
+  "loop": {
+    "observe": "read Operator objective, runtime health, CI state, worker drift, source, history, prior gains, and repository substrate",
+    "orient": "identify the highest-value bottleneck and recover relevant Pro_Code/pro-code and sibling capability donors",
+    "decide": "design the strongest coherent executable capability tranche with explicit risk, preservation, interface, and verification plan",
+    "act": "implement across the material path, compose complementary capability, test, adversarially break, repair, read back, and persist the gain"
+  },
+  "anti_minimization": {
+    "minimal_patch_default": false,
+    "smallest_diff_default": false,
+    "docs_tests_ci_only_default": false,
+    "feature_branch_only_default": false,
+    "freeze_after_green": false,
+    "shrink_on_blocker": false
+  },
+  "blocked_actions": [
+    "raw_secret_write",
+    "raw_sensitive_record_write_without_required_protection",
+    "destructive_history_rewrite_without_explicit_operator_authorization",
+    "evidence_destruction_without_explicit_operator_authorization"
+  ]
 }
