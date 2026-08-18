@@ -1,14 +1,19 @@
 {
-  "schema_id": "glaciereq.nervous-system.v1",
+  "schema_id": "glaciereq.nervous-system-node.v2",
+  "nervous_system_schema_id": "glaciereq.nervous-system.v2",
   "repository": "GlacierEQ/pro-code",
-  "role": "governed_engineering_execution",
-  "canonical_manifest": "GlacierEQ/AKOS/governance/glaciereq.nervous-system.v1.json",
-  "operating_sequence": ["memory", "tool", "cure", "innovate", "respond"],
+  "role": "engineering_execution_innovation",
+  "apex_role": "ACTIVE_EXECUTION_AND_CAPABILITY_DONOR",
+  "apex_manifest": "https://raw.githubusercontent.com/GlacierEQ/AKOS/main/governance/glaciereq.nervous-system.v2.json",
+  "selection_mode": "CURRENT_BEST_REVISABLE",
+  "challengeable": true,
+  "capability_donor_preservation": true,
+  "operating_sequence": ["context", "discover", "compare", "cure", "innovate", "execute", "verify", "persist", "evolve"],
   "relationships": [
     {
       "target": "GlacierEQ/computer-user",
       "relation": "COMPUTER_EXECUTION_KERNEL",
-      "boundary": "pro-code owns engineering operator/runtime intent and local engineering work; computer-user owns governed computer/browser/native execution when that boundary is invoked.",
+      "boundary": "pro-code owns engineering operator/runtime intent and local engineering work; computer-user contributes governed computer/browser/native execution when that capability is selected or composed.",
       "kernel_main_sha": "47de3e53dbf8f9bd10421a6b54a269e035a4b783",
       "kernel_runtime_integration_proven": true,
       "persistent_host_activation_contract_verified": true,
@@ -23,5 +28,6 @@
     }
   ],
   "runtime_integration_claimed": true,
-  "production_deployment_claimed": false
+  "production_deployment_claimed": false,
+  "engineering_law": "Maximum coherent verified capability advance; preserve useful mechanisms, implement innovation, and treat controls as support for execution rather than the objective."
 }
