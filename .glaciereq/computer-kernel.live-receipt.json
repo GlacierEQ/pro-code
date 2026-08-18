@@ -1,11 +1,13 @@
 {
-  "schema": "glaciereq.pro-code.computer-kernel-live-receipt.v1",
+  "schema": "glaciereq.pro-code.computer-kernel-live-receipt.v2",
   "status": "PASS",
   "repository": "GlacierEQ/pro-code",
   "pro_code_source_sha": "c6cbfc8c01db6533c163148457908b03f76e5461",
+  "selection_mode": "CURRENT_BEST_REVISABLE",
+  "challengeable": true,
   "kernel": {
     "repository": "GlacierEQ/computer-user",
-    "canonical_main_sha": "47de3e53dbf8f9bd10421a6b54a269e035a4b783",
+    "selected_main_sha": "47de3e53dbf8f9bd10421a6b54a269e035a4b783",
     "tested_source_sha": "b6aa44b9d90fee4c9c935d958574e6fca0b17680",
     "executor": "GlacierEQ/computer-user"
   },
@@ -34,7 +36,7 @@
     "public_runner_sha": "6700a674ee2c6a52877f1a4023584bc635a67ce3",
     "result_status": "completed"
   },
-  "canonical_kernel_proof": {
+  "kernel_behavioral_proof": {
     "path": "GlacierEQ/computer-user/machine/pro-code-originated-live-receipt-proof.json",
     "hardened_behavioral_receipt_sha256": "a0884186349595983e191f9a357adabdd4ec98a54c5aae54d5fb42d2a2d92b71",
     "hardened_behavioral_tested_source_sha": "5881b9fc6c57599d059432499098fdf3636b7eb4"
@@ -43,6 +45,6 @@
     "runtime_integration_verified": true,
     "persistent_production_host_verified": false,
     "production_deployed": false,
-    "production_claim_requires": "credentialed persistent host + supervised activation + canonical AKOS readback + restart receipt persistence"
+    "production_claim_requires": "credentialed persistent host + supervised activation + verified current APEX/AKOS readback + restart receipt persistence"
   }
 }
