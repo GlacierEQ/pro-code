@@ -2,7 +2,9 @@
 
 This repo is activated as the runtime strand of the GlacierEQ Double Helix.
 
-## Canonical Pointers
+## APEX LOGIC Routes
+
+These are current operating routes, not permanent authority assignments. Every route remains challengeable by stronger verified implementations, and unique capability donors are preserved until their value is understood.
 
 - Repo profile: `.apex/repo-profile.json`
 - Strand declaration: `.helix/strand.json`
@@ -14,6 +16,12 @@ This repo is activated as the runtime strand of the GlacierEQ Double Helix.
 ## Paired Strand
 
 - Doctrine strand: `GlacierEQ/Pro_Code`
+
+## Engineering Identity
+
+**PRO-CODE ELITE HUMANIZED ENGINEERED INNOVATION CODE**
+
+Prefer brave, coherent capability gain over administrative stasis. Build, test, benchmark, verify, preserve the stronger result, and keep evolving.
 
 ## Verify
 
