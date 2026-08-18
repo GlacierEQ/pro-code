@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 import json
 import os
 import sys
@@ -6,11 +8,11 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
-MANIFEST_URL = "https://raw.githubusercontent.com/GlacierEQ/AKOS/main/governance/glaciereq.nervous-system.v1.json"
+MANIFEST_URL = "https://raw.githubusercontent.com/GlacierEQ/AKOS/main/governance/glaciereq.nervous-system.v2.json"
 MANIFEST_TIMEOUT_SECONDS = 20
-KERNEL_MAIN_SHA = "47de3e53dbf8f9bd10421a6b54a269e035a4b783"
+SELECTED_KERNEL_MAIN_SHA = "47de3e53dbf8f9bd10421a6b54a269e035a4b783"
 KERNEL_TESTED_SHA = "b6aa44b9d90fee4c9c935d958574e6fca0b17680"
-AKOS_SHA = "eac3cab001306225b99da41c37370528331966dd"
+AKOS_VERIFIER_SHA = "eac3cab001306225b99da41c37370528331966dd"
 PRO_CODE_SHA = "c6cbfc8c01db6533c163148457908b03f76e5461"
 LIVE_RECEIPT_SHA256 = "277c69fbdbc3a877bdbe3d69267d5fcecc682a56d38d309dd4da3bf8c641f7a6"
 LIVE_RECEIPT_RUN_ID = "31537976922"
@@ -19,57 +21,75 @@ HARDENED_BEHAVIORAL_RECEIPT_SHA256 = "a0884186349595983e191f9a357adabdd4ec98a54c
 LIVE_RECEIPT_PATH = Path(".glaciereq/computer-kernel.live-receipt.json")
 DOC_PATH = Path("docs/COMPUTER_EXECUTION_KERNEL.md")
 CONTRACT_PATH = Path(".glaciereq/nervous-system.node.json")
+EXPECTED_SEQUENCE = ["context", "discover", "compare", "cure", "innovate", "execute", "verify", "persist", "evolve"]
 
 errors: list[str] = []
 
-try:
-    contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
-except (OSError, json.JSONDecodeError) as exc:
-    print(f"::error::unable to load local nervous-system contract: {type(exc).__name__}: {exc}")
-    sys.exit(1)
-if not isinstance(contract, dict):
-    print("::error::local nervous-system contract must be a JSON object")
-    sys.exit(1)
+
+def load_json(path: Path, label: str) -> dict:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        errors.append(f"unable to load {label}: {type(exc).__name__}: {exc}")
+        return {}
+    if not isinstance(value, dict):
+        errors.append(f"{label} must be a JSON object")
+        return {}
+    return value
+
+
+contract = load_json(CONTRACT_PATH, "local nervous-system contract")
 
 try:
     with urlopen(MANIFEST_URL, timeout=MANIFEST_TIMEOUT_SECONDS) as response:
         manifest = json.loads(response.read().decode("utf-8"))
 except (HTTPError, URLError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-    errors.append(
-        "canonical AKOS manifest unavailable or invalid: "
-        f"{type(exc).__name__}: {exc}"
-    )
+    errors.append(f"APEX nervous-system manifest unavailable or invalid: {type(exc).__name__}: {exc}")
     manifest = {}
 if not isinstance(manifest, dict):
-    errors.append("canonical AKOS manifest must be a JSON object")
+    errors.append("APEX nervous-system manifest must be a JSON object")
     manifest = {}
 
 repo = os.environ.get("GITHUB_REPOSITORY", contract.get("repository"))
 node = manifest.get("nodes", {}).get(repo) if isinstance(manifest.get("nodes", {}), dict) else None
+apex = manifest.get("apex_logic", {}) if isinstance(manifest.get("apex_logic", {}), dict) else {}
 
-if not node:
-    errors.append(f"{repo} is not registered in available canonical manifest")
+if manifest.get("schema_id") != "glaciereq.nervous-system.v2":
+    errors.append("nervous-system schema drift")
+if apex.get("selection_mode") != "CURRENT_BEST_REVISABLE":
+    errors.append("APEX selection mode drift")
+if apex.get("challengeable") is not True:
+    errors.append("APEX selections must remain challengeable")
+if apex.get("capability_donor_preservation") is not True:
+    errors.append("APEX capability-donor preservation drift")
+if apex.get("operator_objective_precedence") is not True:
+    errors.append("operator objective precedence drift")
+
+if not isinstance(node, dict):
+    errors.append(f"{repo} is not registered in the current APEX mesh")
 else:
-    if contract.get("schema_id") != manifest.get("schema_id"):
-        errors.append("schema_id drift")
-    if contract.get("repository") != repo:
-        errors.append("repository identity drift")
-    if contract.get("role") != node.get("role"):
-        errors.append("role drift")
-    if manifest.get("canonical_repository") and manifest.get("canonical_path"):
-        expected = f"{manifest['canonical_repository']}/{manifest['canonical_path']}"
-        if contract.get("canonical_manifest") != expected:
-            errors.append("canonical manifest pointer drift")
-    else:
-        errors.append("canonical manifest identity fields missing")
-    if contract.get("operating_sequence") != manifest.get("operating_sequence"):
-        errors.append("operating sequence drift")
+    expected_contract = {
+        "schema_id": "glaciereq.nervous-system-node.v2",
+        "nervous_system_schema_id": manifest.get("schema_id"),
+        "repository": repo,
+        "role": node.get("role"),
+        "apex_role": node.get("apex_role"),
+        "apex_manifest": MANIFEST_URL,
+        "selection_mode": apex.get("selection_mode"),
+        "challengeable": True,
+        "capability_donor_preservation": True,
+        "operating_sequence": EXPECTED_SEQUENCE,
+    }
+    for field, expected in expected_contract.items():
+        if contract.get(field) != expected:
+            errors.append(f"local nervous-system contract drift: {field}")
+
     readme = Path("README.md").read_text(encoding="utf-8").lower()
     for term in node.get("required_terms", []):
-        if term.lower() not in readme:
+        if str(term).lower() not in readme:
             errors.append(f"README missing term: {term}")
     for link in node.get("required_links", []):
-        if link.lower() not in readme:
+        if str(link).lower() not in readme:
             errors.append(f"README missing link: {link}")
 
 raw_relationships = contract.get("relationships") or []
@@ -77,21 +97,18 @@ if not isinstance(raw_relationships, list):
     errors.append("relationships must be a list")
     relationships = []
 else:
-    relationships = []
-    for index, item in enumerate(raw_relationships):
-        if not isinstance(item, dict):
-            errors.append(f"relationships[{index}] must be an object")
-            continue
-        relationships.append(item)
+    relationships = [item for item in raw_relationships if isinstance(item, dict)]
+    if len(relationships) != len(raw_relationships):
+        errors.append("every relationship must be an object")
 
-kernel = [item for item in relationships if item.get("target") == "GlacierEQ/computer-user"]
-if len(kernel) != 1:
+kernel_relationships = [item for item in relationships if item.get("target") == "GlacierEQ/computer-user"]
+if len(kernel_relationships) != 1:
     errors.append("computer-user kernel relationship must appear exactly once")
 else:
-    rel = kernel[0]
+    rel = kernel_relationships[0]
     expected_relationship = {
         "relation": "COMPUTER_EXECUTION_KERNEL",
-        "kernel_main_sha": KERNEL_MAIN_SHA,
+        "kernel_main_sha": SELECTED_KERNEL_MAIN_SHA,
         "kernel_runtime_integration_proven": True,
         "persistent_host_activation_contract_verified": True,
         "persistent_production_host_verified": False,
@@ -100,45 +117,30 @@ else:
         "live_receipt_tested_kernel_sha": KERNEL_TESTED_SHA,
         "live_receipt_sha256": LIVE_RECEIPT_SHA256,
         "live_receipt_capability": "kernel.health",
-        "live_receipt_akos_sha": AKOS_SHA,
+        "live_receipt_akos_sha": AKOS_VERIFIER_SHA,
         "live_receipt_workflow_run_id": LIVE_RECEIPT_RUN_ID,
     }
-    for field, expected_value in expected_relationship.items():
-        if rel.get(field) != expected_value:
+    for field, expected in expected_relationship.items():
+        if rel.get(field) != expected:
             errors.append(f"computer-user relationship drift: {field}")
 
 if contract.get("runtime_integration_claimed") is not True:
-    errors.append("pro-code runtime integration must be claimed after verified receipt")
+    errors.append("pro-code runtime integration must remain claimed after verified receipt")
 if contract.get("production_deployment_claimed") is not False:
     errors.append("production deployment must remain false without persistent-host receipt")
 
-proof_valid = False
-proof: dict = {}
-if not LIVE_RECEIPT_PATH.is_file():
-    errors.append("missing Pro-Code computer-kernel live receipt proof")
-else:
-    try:
-        parsed_proof = json.loads(LIVE_RECEIPT_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        errors.append(f"unable to load live receipt proof: {type(exc).__name__}: {exc}")
-    else:
-        if not isinstance(parsed_proof, dict):
-            errors.append("live receipt proof must be an object")
-        elif not parsed_proof:
-            errors.append("live receipt proof must not be empty")
-        else:
-            proof = parsed_proof
-            proof_valid = True
-
-if proof_valid:
+proof = load_json(LIVE_RECEIPT_PATH, "Pro-Code computer-kernel live receipt proof")
+if proof:
     expected_top = {
-        "schema": "glaciereq.pro-code.computer-kernel-live-receipt.v1",
+        "schema": "glaciereq.pro-code.computer-kernel-live-receipt.v2",
         "status": "PASS",
         "repository": "GlacierEQ/pro-code",
         "pro_code_source_sha": PRO_CODE_SHA,
+        "selection_mode": "CURRENT_BEST_REVISABLE",
+        "challengeable": True,
     }
-    for field, expected_value in expected_top.items():
-        if proof.get(field) != expected_value:
+    for field, expected in expected_top.items():
+        if proof.get(field) != expected:
             errors.append(f"live receipt proof drift: {field}")
 
     kernel_proof = proof.get("kernel")
@@ -147,12 +149,12 @@ if proof_valid:
         kernel_proof = {}
     expected_kernel = {
         "repository": "GlacierEQ/computer-user",
-        "canonical_main_sha": KERNEL_MAIN_SHA,
+        "selected_main_sha": SELECTED_KERNEL_MAIN_SHA,
         "tested_source_sha": KERNEL_TESTED_SHA,
         "executor": "GlacierEQ/computer-user",
     }
-    for field, expected_value in expected_kernel.items():
-        if kernel_proof.get(field) != expected_value:
+    for field, expected in expected_kernel.items():
+        if kernel_proof.get(field) != expected:
             errors.append(f"live receipt kernel drift: {field}")
 
     akos_proof = proof.get("akos")
@@ -161,11 +163,11 @@ if proof_valid:
         akos_proof = {}
     expected_akos = {
         "repository": "GlacierEQ/AKOS",
-        "source_sha": AKOS_SHA,
+        "source_sha": AKOS_VERIFIER_SHA,
         "acceptance_status": "VERIFIED",
     }
-    for field, expected_value in expected_akos.items():
-        if akos_proof.get(field) != expected_value:
+    for field, expected in expected_akos.items():
+        if akos_proof.get(field) != expected:
             errors.append(f"live receipt AKOS drift: {field}")
 
     invocation = proof.get("invocation")
@@ -184,31 +186,31 @@ if proof_valid:
         "terminal_source_sha_bound": True,
         "receipt_hash_bound": True,
     }
-    for field, expected_value in expected_invocation.items():
-        if invocation.get(field) != expected_value:
+    for field, expected in expected_invocation.items():
+        if invocation.get(field) != expected:
             errors.append(f"live receipt invocation drift: {field}")
 
-    governed = proof.get("governed_public_action")
-    if not isinstance(governed, dict):
-        errors.append("governed public action proof must be an object")
-        governed = {}
-    if governed.get("workflow_run_id") != LIVE_RECEIPT_RUN_ID:
+    supervised = proof.get("governed_public_action")
+    if not isinstance(supervised, dict):
+        errors.append("supervised public action proof must be an object")
+        supervised = {}
+    if supervised.get("workflow_run_id") != LIVE_RECEIPT_RUN_ID:
         errors.append("live receipt workflow run drift")
-    if governed.get("result_status") != "completed":
-        errors.append("live receipt governed result is not completed")
+    if supervised.get("result_status") != "completed":
+        errors.append("live receipt supervised result is not completed")
 
-    behavioral = proof.get("canonical_kernel_proof")
+    behavioral = proof.get("kernel_behavioral_proof")
     if not isinstance(behavioral, dict):
-        errors.append("canonical kernel behavioral proof must be an object")
+        errors.append("kernel behavioral proof must be an object")
         behavioral = {}
     expected_behavioral = {
         "path": "GlacierEQ/computer-user/machine/pro-code-originated-live-receipt-proof.json",
         "hardened_behavioral_receipt_sha256": HARDENED_BEHAVIORAL_RECEIPT_SHA256,
         "hardened_behavioral_tested_source_sha": HARDENED_BEHAVIORAL_TESTED_SHA,
     }
-    for field, expected_value in expected_behavioral.items():
-        if behavioral.get(field) != expected_value:
-            errors.append(f"canonical kernel behavioral proof drift: {field}")
+    for field, expected in expected_behavioral.items():
+        if behavioral.get(field) != expected:
+            errors.append(f"kernel behavioral proof drift: {field}")
 
     truth = proof.get("truth_boundary")
     if not isinstance(truth, dict):
@@ -226,10 +228,10 @@ if not DOC_PATH.is_file():
 else:
     text = DOC_PATH.read_text(encoding="utf-8")
     required_doc_values = (
-        KERNEL_MAIN_SHA,
+        SELECTED_KERNEL_MAIN_SHA,
         KERNEL_TESTED_SHA,
         HARDENED_BEHAVIORAL_TESTED_SHA,
-        AKOS_SHA,
+        AKOS_VERIFIER_SHA,
         PRO_CODE_SHA,
         LIVE_RECEIPT_SHA256,
         HARDENED_BEHAVIORAL_RECEIPT_SHA256,
@@ -239,6 +241,7 @@ else:
         "merge-guard proof",
         "production deployment remains false",
         "issue #20",
+        "CURRENT_BEST_REVISABLE",
     )
     for required in required_doc_values:
         if required not in text:
@@ -249,26 +252,23 @@ if errors:
         print(f"::error::{error}")
     sys.exit(1)
 
-print(
-    json.dumps(
-        {
-            "schema": "glaciereq.nervous-system.validation.v1",
-            "status": "verified",
-            "repository": repo,
-            "role": node["role"],
-            "manifest_version": manifest["version"],
-            "computer_execution_kernel": "verified",
-            "canonical_kernel_sha": KERNEL_MAIN_SHA,
-            "tested_kernel_sha": KERNEL_TESTED_SHA,
-            "behavioral_kernel_sha": HARDENED_BEHAVIORAL_TESTED_SHA,
-            "canonical_akos_sha": AKOS_SHA,
-            "pro_code_live_invocation_receipt": True,
-            "live_receipt_sha256": LIVE_RECEIPT_SHA256,
-            "behavioral_receipt_sha256": HARDENED_BEHAVIORAL_RECEIPT_SHA256,
-            "runtime_integration_claimed": True,
-            "persistent_production_host_verified": False,
-            "production_deployment_claimed": False,
-        },
-        indent=2,
-    )
-)
+print(json.dumps({
+    "schema": "glaciereq.nervous-system.validation.v2",
+    "status": "verified",
+    "repository": repo,
+    "role": node["role"],
+    "apex_role": node["apex_role"],
+    "selection_mode": apex["selection_mode"],
+    "manifest_version": manifest["version"],
+    "computer_execution_kernel": "verified",
+    "selected_kernel_sha": SELECTED_KERNEL_MAIN_SHA,
+    "tested_kernel_sha": KERNEL_TESTED_SHA,
+    "behavioral_kernel_sha": HARDENED_BEHAVIORAL_TESTED_SHA,
+    "akos_verifier_sha": AKOS_VERIFIER_SHA,
+    "pro_code_live_invocation_receipt": True,
+    "live_receipt_sha256": LIVE_RECEIPT_SHA256,
+    "behavioral_receipt_sha256": HARDENED_BEHAVIORAL_RECEIPT_SHA256,
+    "runtime_integration_claimed": True,
+    "persistent_production_host_verified": False,
+    "production_deployment_claimed": False,
+}, indent=2))
