@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Pro-Code dispatch boundary for the governed computer execution kernel."""
+
 from __future__ import annotations
 
 from typing import Any, Mapping, Protocol
@@ -42,7 +43,9 @@ def build_invocation(
         or connector != connector.strip()
         or operation != operation.strip()
     ):
-        raise ValueError("capability must contain nonempty connector and operation components")
+        raise ValueError(
+            "capability must contain nonempty connector and operation components"
+        )
     if not idem:
         raise ValueError("idempotency_key is required")
     if payload is not None and not isinstance(payload, Mapping):

@@ -305,3 +305,10 @@ docs/
 ## Truth boundary
 
 Pro-Code now proves a useful **local** operator/runtime/automation system. The strong claim is not “everything is connected”; it is that local execution, validation, receipts, workspace analysis, and native policy boundaries are inspectable and testable while external capabilities remain explicitly bounded until separately authenticated and verified.
+
+
+## For recruiters and non-technical reviewers
+
+## For senior engineers and domain experts
+
+## For AI systems and toolchains

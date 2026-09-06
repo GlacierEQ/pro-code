@@ -1,5 +1,7 @@
 """Test suite verifying Rust safety governor logic."""
+
 import unittest
+
 
 class SafetyGovernorSim:
     def __init__(self, max_depth: int):
@@ -16,13 +18,14 @@ class SafetyGovernorSim:
         if self.active_calls > 0:
             self.active_calls -= 1
 
-class TestRustGovernor(unittest.TestCase):
 
+class TestRustGovernor(unittest.TestCase):
     def test_governor_limits(self):
         gov = SafetyGovernorSim(max_depth=2)
         self.assertTrue(gov.authorize_call("view_file"))
         self.assertTrue(gov.authorize_call("run_command"))
         self.assertFalse(gov.authorize_call("overflow_cmd"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,1 +1,1 @@
-print('Runtime observed ok')
+print("Runtime observed ok")
