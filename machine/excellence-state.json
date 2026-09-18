@@ -63,8 +63,21 @@
     "at": "2026-08-10T05:56Z",
     "from_claim": "PROMOTED",
     "to": "DISCOVERED",
-    "reason": "schema migrate: PROMOTED XOR gap-receipt",
+    "reason": "schema migrate: gap_receipt_enriches_progress (former PROMOTED XOR retired as stopper)",
     "blocker": "MISSING_SRC_OR_TESTS",
-    "rule": "PROMOTED XOR gap-receipt"
+    "rule": "gap_receipt_enriches_progress",
+    "former_rule": "PROMOTED XOR gap-receipt",
+    "gate_policy": {
+      "mode": "enrichment",
+      "stoppers_forbidden": true,
+      "promotion_ladder_forbidden": true
+    }
+  },
+  "operator_contract": "OPERATOR_CONTRACT.md",
+  "gate_policy": {
+    "mode": "enrichment",
+    "stoppers_forbidden": true,
+    "promotion_ladder_forbidden": true,
+    "note": "Helix PROMOTED/demoted ladder retired; checks enrich only."
   }
 }
