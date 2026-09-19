@@ -32,7 +32,7 @@
     "globals": "^17.6.0",
     "typescript": "^5.8.3",
     "vite": "^8.0.16",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.1"
   },
   "memory": {
     "enabled": true,
