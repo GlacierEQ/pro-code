@@ -1,0 +1,28 @@
+{
+  "repo": "GlacierEQ/pro-code",
+  "canonical_name": "pro-code",
+  "aliases": ["procode-runtime", "spiral-engine", "runtime-strand", "pro_code_runtime"],
+  "helix_role": "runtime_strand",
+  "tier": "flagship_parent",
+  "status": "canonical_live",
+  "mission": "Runtime strand for the GlacierEQ Double Helix: live control surface, worker mesh, Nexus API bridge, CI templates, and executable Spiral Engine patterns.",
+  "paired_doctrine_strand": "GlacierEQ/Pro_Code",
+  "aspen_grove_root": "GlacierEQ/aspen-grove-core",
+  "mastermind_doctrine": "GlacierEQ/Pro-Mastermind",
+  "mastermind_runtime": "GlacierEQ/mastermind",
+  "primary_visible_files": ["README.md", "KNOWLEDGE.md", "src/workers.ts", "src/memory.ts", "ci/"],
+  "hidden_substrate": {
+    ".apex": "repo identity, runtime role, Nexus contract",
+    ".helix": "paired doctrine binding and runtime strand declaration",
+    ".aspen": "Grove sync and memory routing policy",
+    ".pistons": "worker registry, runtime contracts, execution pipeline",
+    ".mastermind": "sidecar hooks and auto-repair policy",
+    ".audit": "runtime health, drift, and verification notes"
+  },
+  "pillar_domains": ["ci_templates", "language_profiles", "repo_standards", "runtime_contracts"],
+  "piston_domains": ["workers", "nexus_api", "runtime_dashboard", "auto_repair", "health_sync"],
+  "secret_policy": "no_raw_secrets_committed_use_secret_ref_only",
+  "evidence_policy": "hash_refs_and_pointer_refs_only_no_raw_sensitive_records",
+  "phase": "phase_1a_hidden_substrate",
+  "last_updated": "2026-06-23"
+}

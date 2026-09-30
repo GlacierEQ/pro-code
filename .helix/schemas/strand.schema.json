@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://glaciereq.local/helix/strand.schema.json",
+  "title": "Helix Strand Declaration",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "strand_id",
+    "strand_type",
+    "helix_role",
+    "paired_strand",
+    "paired_strand_role",
+    "inherits_from",
+    "exports_to",
+    "authority",
+    "non_goals",
+    "phase",
+    "last_updated"
+  ],
+  "properties": {
+    "strand_id": {"type": "string", "minLength": 1},
+    "strand_type": {"type": "string", "enum": ["doctrine", "runtime"]},
+    "helix_role": {"type": "string", "minLength": 1},
+    "paired_strand": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+    "paired_strand_role": {"type": "string", "minLength": 1},
+    "inherits_from": {"type": "array", "items": {"type": "string"}},
+    "exports_to": {"type": "array", "items": {"type": "string"}},
+    "authority": {"type": "object", "minProperties": 1},
+    "boot_order_exports": {"type": "array", "items": {"type": "string"}},
+    "boot_order": {"type": "array", "items": {"type": "string"}},
+    "non_goals": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "phase": {"type": "string", "pattern": "^phase_1[ab]_"},
+    "last_updated": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}
+  }
+}

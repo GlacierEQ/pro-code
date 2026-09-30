@@ -1,0 +1,24 @@
+{
+  "registry_name": "pro-code Piston Worker Registry",
+  "repo": "GlacierEQ/pro-code",
+  "source_of_truth": "src/workers.ts",
+  "phase": "phase_1a_hidden_substrate",
+  "last_updated": "2026-06-23",
+  "nexus_base_default": "http://localhost:8002",
+  "runtime_proxy_flow": ["pro-code UI", "WorkersManager.execute()", "nexus-api :8002", "apex-workers-runtime :8003", "capability handler", "result bubbleback"],
+  "worker_classes": {
+    "core_intelligence": ["strategist", "coordinator", "analyst", "creator"],
+    "data_memory": ["database-crawler", "memory-specialist"],
+    "execution": ["python-executor", "api-manager", "mcp-manager"],
+    "media": ["photo-analyzer", "video-processor"],
+    "case_ops": ["case-analyzer", "motion-generator"]
+  },
+  "health_contract": {
+    "health_endpoint": "/health",
+    "worker_execute_endpoint": "/api/v1/workers/{name}/execute",
+    "timeout_ms_health": 5000,
+    "timeout_ms_execute": 30000,
+    "fallback_required": true
+  },
+  "mastermind_hooks": ["detect_worker_drift", "audit_runtime_health", "propose_worker_patch", "verify_ci_template_alignment"]
+}

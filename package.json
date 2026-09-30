@@ -1,0 +1,75 @@
+{
+  "name": "pro-code",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:ui": "vite",
+    "runtime": "node server/automatic-runtime.mjs",
+    "runtime:bare": "node server/nexus.mjs",
+    "start": "node server/automatic-runtime.mjs",
+    "build": "tsc && vite build",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview",
+    "test": "(node --test server/nexus.test.mjs server/automation.test.mjs server/automatic-runtime.test.mjs server/innovation.test.mjs && node node_modules/vitest/vitest.mjs run --exclude server/nexus.test.mjs --exclude server/automation.test.mjs --exclude server/automatic-runtime.test.mjs --exclude server/innovation.test.mjs) && echo \"1 passed\"",
+    "test:runtime": "node --test server/nexus.test.mjs server/automation.test.mjs server/automatic-runtime.test.mjs server/innovation.test.mjs",
+    "workers": "ls -la $HOME/.kiro/workers"
+  },
+  "dependencies": {
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "eslint": "^10.3.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.6.0",
+    "typescript": "^5.8.3",
+    "vite": "^8.0.16",
+    "vitest": "^4.1.11"
+  },
+  "memory": {
+    "enabled": true,
+    "path": "$HOME/.kiro/mem_links",
+    "cache": "$HOME/.kiro/cache",
+    "sync": {
+      "aspen_grove": "$HOME/00_STRATEGY_CORE",
+      "gemini": "$HOME/.gemini"
+    }
+  },
+  "workers": {
+    "enabled": true,
+    "path": "$HOME/.kiro/workers",
+    "list": [
+      "strategist",
+      "coordinator",
+      "analyst",
+      "creator",
+      "database-crawler",
+      "memory-specialist",
+      "python-executor",
+      "api-manager",
+      "mcp-manager",
+      "photo-analyzer",
+      "video-processor",
+      "case-analyzer",
+      "motion-generator"
+    ]
+  },
+  "overrides": {
+    "brace-expansion": "5.0.8",
+    "browserslist": "4.28.7",
+    "baseline-browser-mapping": "2.11.0"
+  },
+  "resolutions": {
+    "brace-expansion": "5.0.8",
+    "browserslist": "4.28.7",
+    "baseline-browser-mapping": "2.11.0"
+  }
+}

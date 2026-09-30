@@ -1,0 +1,18 @@
+#!/bin/bash
+# Aspen Grove Core: Development server launcher
+# Use WORKTREE_PATH or derive ports/config from it for isolated runs
+
+cd "${WORKTREE_PATH:-$(pwd)}"
+
+# Extract branch name for unique port assignment
+BRANCH="${GITHUB_HEAD_REF:-$(git branch --show-current 2>/dev/null || echo 'dev')}"
+PORT_SUFFIX=$(echo "$BRANCH" | grep -o '[0-9]*$' | tail -c 4 | sed 's/^0*//' || echo '0')
+
+# Run dev server on derived port
+if [ -f "package.json" ]; then
+    npm run dev -- --port $((3000 + PORT_SUFFIX)) --host 2>/dev/null || \
+    npm run dev 2>/dev/null || \
+    echo "No dev script found in package.json"
+else
+    echo "No package.json found"
+fi
