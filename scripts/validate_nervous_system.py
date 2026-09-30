@@ -56,7 +56,28 @@ contract = load_json(CONTRACT_PATH, "local nervous-system contract")
 try:
     with urlopen(MANIFEST_URL, timeout=MANIFEST_TIMEOUT_SECONDS) as response:
         manifest = json.loads(response.read().decode("utf-8"))
-except (HTTPError, URLError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+except (HTTPError, URLError) as exc:
+    # The APEX manifest lives in a private repository. Anonymous readers (public
+    # forks, GitHub Actions without cross-repo access) get 404, so the contract
+    # cannot be compared; skip instead of reporting drift that is not real.
+    reason = f"{type(exc).__name__}: {exc}"
+    print(
+        f"::notice::APEX nervous-system manifest not reachable ({reason}); "
+        "nervous-system contract check skipped"
+    )
+    print(
+        json.dumps(
+            {
+                "status": "skipped",
+                "reason": "apex_manifest_unreachable",
+                "detail": reason,
+                "manifest": MANIFEST_URL,
+            },
+            indent=2,
+        )
+    )
+    sys.exit(0)
+except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
     errors.append(
         f"APEX nervous-system manifest unavailable or invalid: {type(exc).__name__}: {exc}"
     )
