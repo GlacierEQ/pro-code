@@ -22,20 +22,29 @@ Built by [Casey Barton](https://casey-barton-glaciereq.vercel.app), forward-depl
 
 ```mermaid
 flowchart LR
-  UI["React + TypeScript cockpit<br/>capabilities, worker state, dispatch"] -->|governed envelope| NX["Nexus runtime (Node)<br/>ownership, identity, idempotency, ack"]
-  NX -->|validated dispatch| W["Workers"]
-  NX --> R[("Idempotent receipts")]
-  NX --> WI["Workspace intelligence<br/>SHA-256, duplicates, deltas"]
-  NX -.->|missing authority or identity| FC["Fail closed"]
-  subgraph NV["Native verification"]
-    RS["Rust call-depth governor"]
-    HS["Haskell AST invariants"]
-    PY["Python repository contracts"]
-  end
-  W --> RS
-  W --> HS
-  W --> PY
-  CI["GitHub Actions<br/>native verification, Nervous System, Helix Verify, CodeQL"] --> NX
+    subgraph Cockpit["Operator surface"]
+        UI["React + TypeScript cockpit<br/>capabilities · worker state · dispatch"]
+    end
+    subgraph Runtime["Nexus runtime (Node)"]
+        NX["Governed dispatch<br/>ownership · identity · idempotency · ack"]
+        R["Idempotent receipts<br/>replay returns original · reuse = 409"]
+        WI["Workspace intelligence<br/>SHA-256 · duplicates · deltas"]
+        FC["Fail closed<br/>missing authority or identity"]
+    end
+    subgraph Native["Native verification"]
+        RS["Rust call-depth governor"]
+        HS["Haskell AST invariants"]
+        PY["Python repository contracts"]
+    end
+    CI["GitHub Actions<br/>native verification · Nervous System · Helix Verify · CodeQL"]
+    UI --> NX
+    NX --> R
+    NX --> WI
+    NX --> FC
+    NX --> RS
+    NX --> HS
+    NX --> PY
+    CI --> Native
 ```
 
 ## Run it
