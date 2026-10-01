@@ -1,55 +1,58 @@
-# Pro-Code — Governed Local Engineering Operator
+# Pro-Code · Governed Local Engineering Operator
 
-> A React/TypeScript operator surface backed by a dependency-free local Nexus runtime, fail-closed worker dispatch, automatic workspace intelligence, and native polyglot verification.
+**An AI engineering operator that has to prove it's allowed, prove it did the work, and prove it in the system's native language before it reports success.** It pairs a React/TypeScript cockpit with a dependency-free Node "Nexus" runtime, fail-closed worker dispatch, idempotent receipts, automatic workspace intelligence, and native verification in Rust and Haskell.
 
-[![Pro-Code native verification](https://github.com/GlacierEQ/pro-code/actions/workflows/ci.yml/badge.svg)](https://github.com/GlacierEQ/pro-code/actions/workflows/ci.yml)
+[![Pro-Code native verification](https://github.com/GlacierEQ/pro-code/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/GlacierEQ/pro-code/actions/workflows/ci.yml)
+[![Nervous System Contract](https://github.com/GlacierEQ/pro-code/actions/workflows/nervous-system-contract.yml/badge.svg?branch=main)](https://github.com/GlacierEQ/pro-code/actions/workflows/nervous-system-contract.yml)
+[![Helix Verify](https://github.com/GlacierEQ/pro-code/actions/workflows/helix-verify.yml/badge.svg?branch=main)](https://github.com/GlacierEQ/pro-code/actions/workflows/helix-verify.yml)
+[![CodeQL](https://github.com/GlacierEQ/pro-code/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/GlacierEQ/pro-code/actions/workflows/codeql.yml)
 
-**Version:** `0.2.0`  
-**Canonical repository:** `GlacierEQ/pro-code`  
-**Canonical branch:** `main`  
-**Current posture:** `LOCAL_OPERABLE`  
-**Current evidence:** `TEST`
+Built by [Casey Barton](https://casey-barton-glaciereq.vercel.app), forward-deployed AI engineer · [LinkedIn](https://www.linkedin.com/in/caseybartonai) · part of the [Job-App Helix](https://github.com/GlacierEQ/job-app-helix) portfolio.
 
-Pro-Code is the public executable strand of the GlacierEQ engineering doctrine. It is now a runnable local system rather than only a frontend contract: the repository owns a local Nexus HTTP runtime, a governed dispatch envelope, idempotent receipts, an automatic workspace-inventory operator, optional explicitly configured filesystem synchronization, the React operator UI, and native Rust/Haskell policy checks.
+## What this proves
 
-It does **not** claim a production worker fleet, external provider authorization, live remote Mastermind/APEX mesh connectivity, or permission to execute external actions.
+- **Bounded authority, enforced in code.** The Nexus runtime ([`server/nexus.mjs`](server/nexus.mjs)) validates worker ownership, case/trace/task/idempotency identity, bounded constraints, and explicit acknowledgement before it reports success. Anything else fails closed.
+- **Replay-safe by construction.** An identical replay returns the original receipt (`X-Idempotent-Replay: true`). Reusing a key with a different envelope is rejected with `409`. Both cases are tested in `server/nexus.test.mjs`.
+- **Polyglot native verification.** Each layer is tested in its own language on every push: TypeScript/React (Vitest), Node runtime (`node --test`), Python repository contracts (`unittest`), a Rust call-depth governor, and Haskell AST validity invariants.
+- **Security and contract gates in CI.** Four workflows run on `main`: native verification, Nervous System Contract, Helix Verify, and CodeQL.
+- **Workspace intelligence.** A bounded recursive inventory produces SHA-256 hashes, exact duplicate groups, change deltas, category summaries, and evidence-ranked candidates.
+- **Hard safety by default.** Every dispatch envelope must declare `external_actions: forbidden` or it's rejected. Ambiguous 2xx responses and transport fallbacks never count as success.
 
-## Recruiter view
+## Architecture
 
-### What works now
+```mermaid
+flowchart LR
+  UI[React / TypeScript cockpit<br/>capabilities · worker state · dispatch] -->|governed envelope| NX[Nexus runtime · Node<br/>ownership · identity · idempotency · ack]
+  NX -->|validated dispatch| W[Workers]
+  NX --> R[(Idempotent receipts)]
+  NX --> WI[Workspace intelligence<br/>SHA-256 · duplicates · deltas]
+  NX -.->|missing authority / identity| FC[fail closed]
+  subgraph Native verification
+    RS[Rust call-depth governor]
+    HS[Haskell AST invariants]
+    PY[Python repository contracts]
+  end
+  W --> RS & HS & PY
+  CI[GitHub Actions: native verification · Nervous System · Helix Verify · CodeQL] --> NX
+```
 
-Running the repository locally can provide three useful layers together:
-
-1. **Operator surface** — React/Vite UI for selecting capabilities, case context, worker state, and dispatch.
-2. **Governed local runtime** — Node Nexus server validates worker ownership, case/trace/task/idempotency identity, bounded constraints, and explicit acknowledgement before reporting success.
-3. **Automatic workspace intelligence** — bounded recursive inventory produces SHA-256 hashes where eligible, exact duplicate groups, file/change deltas, category summaries, and heuristic evidence-oriented candidate ranking.
-
-The system also preserves native language boundaries:
-
-- Rust for a bounded call-depth governor;
-- Haskell for pure AST validity invariants;
-- Python for repository-level checks;
-- TypeScript/React for operator and dispatch contracts.
-
-### Fast proof path
+## Run it
 
 ```bash
 npm ci
-npm run lint
-npm run typecheck
-npm test
+npm run lint && npm run typecheck
+npm test            # Vitest + node --test
 npm run build
 
 python -m unittest discover -s tests -p 'test_*.py' -v
 
-rustc --edition 2021 --test src/governor.rs -o /tmp/pro-code-governor-tests
-/tmp/pro-code-governor-tests
-
-ghc -Wall -Werror -isrc tests/ASTValidatorSpec.hs -o /tmp/pro-code-ast-tests
-/tmp/pro-code-ast-tests
+rustc --edition 2021 --test src/governor.rs -o /tmp/pro-code-governor-tests && /tmp/pro-code-governor-tests
+ghc -Wall -Werror -isrc tests/ASTValidatorSpec.hs -o /tmp/pro-code-ast-tests && /tmp/pro-code-ast-tests
 ```
 
-At canonical head `c1fbf3f3d28f596d28903fa2f8a91c7fbaecb6af`, both the repository's native verification workflow and Helix Verify completed successfully on `main`. A future source change must earn a fresh receipt; this README does not make those historical runs permanently authoritative for later heads.
+Version `0.2.0` · canonical branch `main` · posture `LOCAL_OPERABLE`. Each source change has to earn a fresh CI receipt, so check the badges above for the current head.
+
+---
 
 ## Engineering anatomy
 
