@@ -22,18 +22,20 @@ Built by [Casey Barton](https://casey-barton-glaciereq.vercel.app), forward-depl
 
 ```mermaid
 flowchart LR
-  UI[React / TypeScript cockpit<br/>capabilities · worker state · dispatch] -->|governed envelope| NX[Nexus runtime · Node<br/>ownership · identity · idempotency · ack]
-  NX -->|validated dispatch| W[Workers]
-  NX --> R[(Idempotent receipts)]
-  NX --> WI[Workspace intelligence<br/>SHA-256 · duplicates · deltas]
-  NX -.->|missing authority / identity| FC[fail closed]
-  subgraph Native verification
-    RS[Rust call-depth governor]
-    HS[Haskell AST invariants]
-    PY[Python repository contracts]
+  UI["React + TypeScript cockpit<br/>capabilities, worker state, dispatch"] -->|governed envelope| NX["Nexus runtime (Node)<br/>ownership, identity, idempotency, ack"]
+  NX -->|validated dispatch| W["Workers"]
+  NX --> R[("Idempotent receipts")]
+  NX --> WI["Workspace intelligence<br/>SHA-256, duplicates, deltas"]
+  NX -.->|missing authority or identity| FC["Fail closed"]
+  subgraph NV["Native verification"]
+    RS["Rust call-depth governor"]
+    HS["Haskell AST invariants"]
+    PY["Python repository contracts"]
   end
-  W --> RS & HS & PY
-  CI[GitHub Actions: native verification · Nervous System · Helix Verify · CodeQL] --> NX
+  W --> RS
+  W --> HS
+  W --> PY
+  CI["GitHub Actions<br/>native verification, Nervous System, Helix Verify, CodeQL"] --> NX
 ```
 
 ## Run it
