@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout this strand
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: self
 
@@ -44,7 +44,7 @@ jobs:
 
       - name: Checkout paired doctrine strand
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.check_peer == 'true' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: GlacierEQ/Pro_Code
           ref: helix-phase-1b
