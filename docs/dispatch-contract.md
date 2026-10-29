@@ -49,3 +49,17 @@ Nexus must return JSON in one of these explicit success forms:
 ```
 
 Errors should return a non-2xx status and an `error` string. Nexus must enforce the same case scope, idempotency, auth, signature, and human-review constraints server-side; browser checks alone are not an authorization boundary.
+
+## Verified execution and concurrent replay
+
+A capability's registration is not proof that a local executor exists. Nexus returns
+`501 unsupported` with `success: false` and an explicit explanation when no
+handler ran. A completed workspace-intelligence dispatch identifies its manifest
+and describes the work it actually performed; it is not proof of a separate
+domain operation.
+
+A success acknowledgement requires **both** `status: "succeeded"` and
+`success: true`, along with a string result. Contradictory responses fail.
+Identical requests received concurrently share one in-flight execution and
+receipt. Reuse of the same idempotency key with a different envelope returns
+`409`. Failed executions are not cached as successful receipts.

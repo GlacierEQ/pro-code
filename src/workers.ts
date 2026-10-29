@@ -310,7 +310,7 @@ export class WorkersManager {
       if (!body || body.error) {
         throw { kind: 'runtime', message: body?.error ?? 'Runtime returned no JSON acknowledgement' };
       }
-      if (body.status !== 'succeeded' && body.success !== true) {
+      if (body.status !== 'succeeded' || body.success !== true) {
         throw { kind: 'invalid', message: 'Runtime response did not explicitly acknowledge success' };
       }
       if (typeof body.result !== 'string') {

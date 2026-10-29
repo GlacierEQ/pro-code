@@ -214,6 +214,9 @@ export class WorkspaceAutomation {
   async executeCapability(capability, params = {}) {
     if (!ACTIVE_CAPABILITIES.has(capability)) return { handled: false, summary: this.status.latest };
     const status = await this.run(`capability:${capability}`);
+    if (status.state !== 'idle' || !status.latest?.manifest_id) {
+      throw new Error(status.last_error ?? `Workspace automation failed for ${capability}`);
+    }
     return {
       handled: true,
       summary: status.latest,

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { NOTION_WORKER_COUNT, WorkersManager } from './workers';
 
 function okResponse(result = 'done'): Response {
-  return new Response(JSON.stringify({ status: 'succeeded', result }), {
+  return new Response(JSON.stringify({ status: 'succeeded', success: true, result }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
@@ -110,6 +110,21 @@ describe('WorkersManager dispatch contract', () => {
 
     expect(result).toMatchObject({ status: 'failed', success: false, live: false });
     expect(result.error?.code).toBe('invalid_response');
+  });
+
+  it('rejects contradictory success acknowledgements even with HTTP 200', async () => {
+    for (const payload of [
+      { status: 'succeeded', success: false, result: 'not complete' },
+      { status: 'failed', success: true, result: 'conflicting state' },
+    ]) {
+      const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(JSON.stringify(payload), { status: 200 }),
+      );
+      const manager = new WorkersManager({ fetchImpl, baseUrl: '', caseId: 'CASE-1' });
+      const result = await manager.execute('analyzeCase');
+      expect(result).toMatchObject({ status: 'failed', success: false, live: false });
+      expect(result.error?.code).toBe('invalid_response');
+    }
   });
 
   it('rejects unknown capabilities without passthrough', async () => {
