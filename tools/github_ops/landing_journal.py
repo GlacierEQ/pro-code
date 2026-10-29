@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sqlite3
 from contextlib import contextmanager, closing
 from datetime import datetime, timezone
@@ -48,8 +49,8 @@ def validated_intent(intent: dict) -> dict:
     if any(not isinstance(key, str) or not key for key in expected):
         raise LandingStateError("intent.expected field names must be non-empty")
     if intent["operation"] in {"merge_pr", "close_pr"}:
-        if not isinstance(intent.get("expected_head_sha"), str) or len(intent["expected_head_sha"]) != 40:
-            raise LandingStateError("PR mutations require an exact 40-character expected_head_sha")
+        if not isinstance(intent.get("expected_head_sha"), str) or re.fullmatch(r"[0-9a-f]{40}", intent["expected_head_sha"]) is None:
+            raise LandingStateError("PR mutations require a lowercase 40-character hex expected_head_sha")
         if expected.get("head_sha") != intent["expected_head_sha"]:
             raise LandingStateError("expected.head_sha must equal expected_head_sha")
         if intent["operation"] == "merge_pr" and not (expected.get("merged") is True and expected.get("state") == "closed"):
@@ -107,12 +108,26 @@ class LandingJournal:
             db.execute("BEGIN IMMEDIATE")
             yield db
             db.execute("COMMIT")
+        except sqlite3.OperationalError as error:
+            if db.in_transaction:
+                db.execute("ROLLBACK")
+            if "locked" in str(error).lower() or "busy" in str(error).lower():
+                raise LandingStateError("journal busy: inspect native state before any write retry") from error
+            raise
         except BaseException:
             if db.in_transaction:
                 db.execute("ROLLBACK")
             raise
         finally:
             db.close()
+
+    @contextmanager
+    def _read(self):
+        """Concurrent readers do not acquire SQLite's write-reservation lock."""
+        with closing(sqlite3.connect(self.path, timeout=15)) as db:
+            db.row_factory = sqlite3.Row
+            db.execute("PRAGMA busy_timeout=15000")
+            yield db
 
     @staticmethod
     def _event(db, plan_id, step_id, kind, detail):
@@ -241,7 +256,7 @@ class LandingJournal:
             return {**dict(self._get(db, plan_id, step_id)), "observation": new_state}
 
     def status(self, plan_id: str | None = None) -> dict:
-        with self._connect() as db:
+        with self._read() as db:
             if plan_id is None:
                 rows = db.execute("SELECT * FROM steps ORDER BY plan_id,step_id").fetchall()
             else:
@@ -249,7 +264,7 @@ class LandingJournal:
             return {"steps": [dict(row) for row in rows]}
 
     def history(self, plan_id: str, step_id: str) -> list[dict]:
-        with self._connect() as db:
+        with self._read() as db:
             return [dict(row) for row in db.execute(
                 "SELECT * FROM events WHERE plan_id=? AND step_id=? ORDER BY sequence", (plan_id, step_id)
             )]
