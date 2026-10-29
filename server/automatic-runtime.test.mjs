@@ -8,13 +8,13 @@ import { startAutomaticRuntime } from './automatic-runtime.mjs';
 function dispatchEnvelope(capability, taskId) {
   return {
     schema_version: '1.0.0',
-    case_id: 'CASE-AUTO-TEST',
+    case_id: capability === 'inventoryWorkspace' ? 'workspace:local' : 'CASE-AUTO-TEST',
     trace_id: `trace-${taskId}`,
     task_id: taskId,
     idempotency_key: `idem-${taskId}`,
     priority: 'normal',
     constraints: {
-      human_review_required: true,
+      human_review_required: capability !== 'inventoryWorkspace',
       external_actions: 'forbidden',
       max_runtime_ms: 30_000,
       allowed_tools: [],

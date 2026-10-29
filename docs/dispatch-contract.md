@@ -11,7 +11,7 @@ VITE_NEXUS_BASE_URL=https://nexus.internal.example
 VITE_CASE_ID=CASE-DEMO-0001
 ```
 
-`VITE_CASE_ID` is optional at build time, but dispatch is rejected until a caller or deployment supplies an explicit case identifier. Do not put bearer tokens or private signing keys in Vite variables; Vite exposes them to the browser.
+`VITE_CASE_ID` is required only for case-scoped operations. Read-only `inventoryWorkspace` uses the explicit `workspace:local` scope when no case is configured. This scope is not a legal case identifier. Do not put bearer tokens or private signing keys in Vite variables; Vite exposes them to the browser.
 
 ## Envelope
 
@@ -19,7 +19,7 @@ Every worker request includes:
 
 - `case_id`, `trace_id`, `task_id`, and `idempotency_key`
 - a declared `priority`
-- fail-closed constraints requiring human review and forbidding external actions
+- scope-specific constraints: inventory sets `human_review_required: false` and runs without an unrelated approval; other operations require review intent and a real case identity; external actions remain forbidden
 - a versioned producer identity
 - the selected worker, capability, parameters, and creation time
 - optional non-secret auth metadata and a detached signature
@@ -59,6 +59,8 @@ An incomplete scan (unreadable directory, file-limit exhaustion, or failed/
 unstable hash) raises an execution error rather than producing a full success.
 An inventory verifies inventory work, not the validity of source documents
 or completion of unrelated code, legal, or AI operations.
+
+Unrelated setup requirements must not prevent a safe local read-only operation. Review and identity checks remain on higher-risk case-scoped actions.
 
 Errors return a non-2xx status and an `error` string. Nexus must enforce
 case scope, idempotency and server-side constraints independently from the UI.

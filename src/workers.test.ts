@@ -22,6 +22,20 @@ describe('WorkersManager dispatch contract', () => {
     expect(NOTION_WORKER_COUNT).toBe(15);
   });
 
+  it('runs local workspace inventory without a case ID or approval ceremony', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => okResponse(init));
+    const manager = new WorkersManager({ fetchImpl, baseUrl: 'https://nexus.example' });
+    const result = await manager.execute('inventoryWorkspace');
+    expect(result).toMatchObject({
+      status: 'succeeded', success: true, objectiveCompleted: true, operation: 'workspace_inventory',
+    });
+    const envelope = JSON.parse(String(fetchImpl.mock.calls[0][1]?.body));
+    expect(envelope.case_id).toBe('workspace:local');
+    expect(envelope.constraints).toMatchObject({
+      human_review_required: false, external_actions: 'forbidden',
+    });
+  });
+
   it('rejects a dispatch without case context before calling the network', async () => {
     const fetchImpl = vi.fn<typeof fetch>();
     const manager = new WorkersManager({ fetchImpl, baseUrl: 'https://nexus.example' });
@@ -69,7 +83,7 @@ describe('WorkersManager dispatch contract', () => {
       priority: 'high',
       producer: { system: 'pro-code', component: 'workers-manager', version: '1.0.0' },
       constraints: {
-        human_review_required: true,
+        human_review_required: false,
         external_actions: 'forbidden',
         allowed_tools: ['casebrain:recall'],
         source_refs: ['sha256:abc'],

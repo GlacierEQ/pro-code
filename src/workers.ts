@@ -22,7 +22,7 @@ export interface WorkerConfig {
 }
 
 export interface DispatchConstraints {
-  human_review_required: true;
+  human_review_required: boolean;
   external_actions: 'forbidden';
   max_runtime_ms: number;
   allowed_tools: string[];
@@ -252,9 +252,11 @@ export class WorkersManager {
       return this.reject('nexus', capability, 'unknown_capability', `No registered worker owns ${capability}`, startedAt);
     }
 
-    const caseId = options.caseId?.trim() || this.configuredCaseId;
-    if (!caseId) {
-      return this.reject(worker.name, capability, 'case_context_required', 'Dispatch requires an explicit case_id', startedAt);
+    const caseId = options.caseId?.trim() || this.configuredCaseId ||
+      (capability === 'inventoryWorkspace' ? 'workspace:local' : '');
+    if (!caseId || (caseId === 'workspace:local' && capability !== 'inventoryWorkspace')) {
+      return this.reject(worker.name, capability, 'case_context_required',
+        'A real case_id is required for case-scoped operations', startedAt);
     }
 
     const taskId = options.taskId ?? this.idFactory('task');
@@ -266,7 +268,7 @@ export class WorkersManager {
       idempotency_key: options.idempotencyKey ?? `pro-code:${caseId}:${taskId}`,
       priority: options.priority ?? 'normal',
       constraints: {
-        human_review_required: true,
+        human_review_required: capability !== 'inventoryWorkspace',
         external_actions: 'forbidden',
         max_runtime_ms: options.maxRuntimeMs ?? this.timeoutMs,
         allowed_tools: [...(options.allowedTools ?? [])],
