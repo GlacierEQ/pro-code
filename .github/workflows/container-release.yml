@@ -186,7 +186,7 @@ jobs:
           docker tag pro-code:verified "$revision"
           push_output="$(docker push "$revision")"
           printf '%s\n' "$push_output"
-          digest="$(printf '%s\n' "$push_output" | sed -n 's/.*digest: \\(sha256:[0-9a-f]*\\).*/\\1/p' | tail -n 1)"
+          digest="$(printf '%s\n' "$push_output" | awk '/digest: sha256:/ {for (i=1; i<=NF; i++) if ($i=="digest:") print $(i+1)}' | tail -n 1)"
           test -n "$digest"
           docker manifest inspect "$image@$digest" >/dev/null
           docker tag pro-code:verified "$image:main"
