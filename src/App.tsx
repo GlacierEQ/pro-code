@@ -5,7 +5,7 @@ import type { WorkerConfig } from './workers';
 import { useWorkerHealth } from './useWorkerHealth';
 import './App.css';
 
-const ACTIVE_CASE_ID = import.meta.env.VITE_CASE_ID?.trim() || 'CASE-LOCAL-DEMO';
+const ACTIVE_CASE_ID = import.meta.env.VITE_CASE_ID?.trim() || '';
 
 type BtnKey = 'inventoryWorkspace';
 type TriggerConfig = {
@@ -185,7 +185,7 @@ export default function App() {
           { label: 'Declared roles', value: stats.total },
           { label: 'Verified workers', value: stats.verified },
           { label: 'Running', value: stats.running, highlight: stats.running > 0 },
-          { label: 'Total Runs', value: stats.totalRuns },
+          { label: 'Dispatch attempts', value: stats.totalRuns },
           { label: 'Errors', value: stats.error, highlight: stats.error > 0, danger: true },
         ].map(({ label, value, highlight, danger }) => (
           <article key={label} className={`stat-card${highlight ? (danger ? ' stat-card--danger' : ' stat-card--active') : ''}`}>
@@ -196,7 +196,7 @@ export default function App() {
       </section>
 
       <section className="trigger-console" aria-labelledby="triggers-heading">
-        <p className="qs-caption">Only capabilities explicitly announced by this live runtime are executable. Unsupported buttons are unavailable, not completed.</p>
+        <p className="qs-caption">Only capabilities explicitly announced by this live runtime are executable. Unsupported buttons are unavailable, not completed. {!ACTIVE_CASE_ID && 'Configure VITE_CASE_ID before dispatching; no fabricated case identity is used.'}</p>
         <div className="section-header">
           <h2 id="triggers-heading"><span className="section-icon">⟁</span> Command Console</h2>
           <button className="log-toggle" onClick={() => void recheck()} disabled={checking}>
@@ -216,7 +216,7 @@ export default function App() {
                     <button
                       className={`trigger-btn trigger-btn--${tier}`}
                       onClick={() => void triggerNexus(key)}
-                      disabled={loading || !nexusOnline || !executableCapabilities.has(trigger.capability)}
+                      disabled={loading || !nexusOnline || !ACTIVE_CASE_ID || !executableCapabilities.has(trigger.capability)}
                       title={!executableCapabilities.has(trigger.capability) ? 'No verified local executor for this operation' : `Execute ${trigger.capability}`}
                       aria-busy={loading}
                     >
@@ -274,7 +274,7 @@ export default function App() {
                           event.stopPropagation();
                           void dispatchCapability(capability);
                         }}
-                        disabled={capLoading || !nexusOnline || !executableCapabilities.has(capability)}
+                        disabled={capLoading || !nexusOnline || !ACTIVE_CASE_ID || !executableCapabilities.has(capability)}
                         title={executableCapabilities.has(capability) ? `Execute ${capability}` : 'No local executor registered'}
                       >
                         {capability}
@@ -283,7 +283,7 @@ export default function App() {
                   </div>
                 )}
                 <div className="worker-telemetry">
-                  <span className="telemetry-item">🔁 {worker.runsCount} run{worker.runsCount !== 1 ? 's' : ''}</span>
+                  <span className="telemetry-item">🔁 {worker.runsCount} attempt{worker.runsCount !== 1 ? 's' : ''}</span>
                   {worker.lastRun && <span className="telemetry-item">🕐 {new Date(worker.lastRun).toLocaleTimeString()}</span>}
                   {worker.lastError && <span className="telemetry-item telemetry-item--error" title={worker.lastError}>⚠ err</span>}
                 </div>
@@ -316,7 +316,7 @@ export default function App() {
                   key={`${worker}__${cap}`}
                   className="cap-card"
                   onClick={() => void dispatchCapability(cap)}
-                  disabled={capLoading || !nexusOnline || !executableCapabilities.has(cap)}
+                  disabled={capLoading || !nexusOnline || !ACTIVE_CASE_ID || !executableCapabilities.has(cap)}
                   title={executableCapabilities.has(cap) ? `Execute on ${worker}` : `${worker}: declared, not executable`}
                 >
                   <span className="cap-name">{cap}</span>
