@@ -47,6 +47,18 @@ flowchart LR
     CI --> Native
 ```
 
+## Executable TypeScript code intelligence
+
+The repository includes a real compiler-backed analysis command, rather than a prose-only 'code intelligence' claim:
+
+```bash
+npm ci
+npm run code:inspect -- --impact src/workers.ts --out .pro-code/runtime/impact.json
+npm run test:code-intelligence
+```
+
+This resolves static/re-export and literal dynamic imports using TypeScript's compiler API, enumerates module exports, reports actual compiler diagnostics and unresolved imports, and computes transitive reverse dependencies for the requested file. The report is machine-readable JSON with exact file paths, counts, limitations and compiler version. Nonliteral dynamic imports are explicitly unknown; files outside the configured TypeScript project are not silently counted as analyzed. This is a developer/CI tool using the existing TypeScript dev dependency, not a deployed Nexus worker or a claim that every language is analyzed.
+
 ## Run it
 
 ```bash
