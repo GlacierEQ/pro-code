@@ -131,7 +131,8 @@ test('bounded hashing overlaps file I/O while preserving complete digest and dup
   assert.equal(peak, 2, 'multiple files hash concurrently, bounded by configuration');
   assert.equal(manifest.summary.hash_complete, true);
   assert.equal(manifest.summary.hashed_files, 3);
-  assert.deepEqual(manifest.files.map(file => file.path), ['README.md', 'case/Docket-Order-Exhibit.txt', 'case/copy.txt']);
+  assert.deepEqual(manifest.files.map(file => file.path),
+    ['README.md', 'case/Docket-Order-Exhibit.txt', 'case/copy.txt'].sort((a, b) => a.localeCompare(b)));
   assert.equal(manifest.duplicates[0].copies, 2);
   for (const file of manifest.files) {
     const actual = createHash('sha256').update(await readFile(path.join(root, file.path))).digest('hex');
