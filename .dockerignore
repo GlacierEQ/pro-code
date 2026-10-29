@@ -1,0 +1,27 @@
+# Keep workstation state, secrets, and transient outputs out of the image.
+.git
+.github
+.pro-code
+.audit
+node_modules
+dist
+dist-ssr
+coverage
+tmp
+temp
+*.log
+*.local
+.env
+.env.*
+.npmrc
+*.pem
+*.key
+*.p12
+*.pfx
+*.zip
+*.pdf
+__pycache__
+.pytest_cache
+.DS_Store
+.vscode
+.idea
