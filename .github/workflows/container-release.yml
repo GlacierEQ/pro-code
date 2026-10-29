@@ -163,7 +163,7 @@ jobs:
           {
             echo "### Verified image published"
             echo "- Source commit: \`$GITHUB_SHA\`"
-            echo "- Immutable tag: \`$immutable\`"
+            echo "- Revision tag: \`$immutable\`"
             echo "- Registry digest: \`$digest\`"
             echo "- Mutable convenience tag: \`$image:main\`"
             echo "- Verification: image build, Node tests, live HTTP and fail-closed dispatch"
