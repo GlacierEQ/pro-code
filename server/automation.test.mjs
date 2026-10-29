@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, test } from 'node:test';
+import { createHash } from 'node:crypto';
 import { WorkspaceAutomation } from './automation.mjs';
 
 const roots = [];
@@ -101,6 +102,54 @@ test('incomplete max-file scan fails rather than claiming a complete manifest', 
   const root = await fixture();
   const automation = new WorkspaceAutomation({ workspaceRoot: root, env: { PRO_CODE_MAX_FILES: '2' } });
   await assert.rejects(() => automation.run('test'), /scan incomplete: exceeded PRO_CODE_MAX_FILES/);
+  assert.equal(automation.getStatus().state, 'error');
+  assert.equal(automation.getStatus().latest, null);
+});
+
+test('bounded hashing overlaps file I/O while preserving complete digest and duplicate evidence', async () => {
+  const root = await fixture();
+  let active = 0;
+  let peak = 0;
+  const hashFile = async file => {
+    active += 1;
+    peak = Math.max(peak, active);
+    try {
+      await Promise.resolve();
+      return createHash('sha256').update(await readFile(file)).digest('hex');
+    } finally {
+      active -= 1;
+    }
+  };
+  const automation = new WorkspaceAutomation({
+    workspaceRoot: root,
+    env: { PRO_CODE_HASH_CONCURRENCY: '2' },
+    hashFile,
+    now: () => new Date('2026-08-06T08:00:00.000Z'),
+  });
+  const status = await automation.run('parallel-hash');
+  const manifest = JSON.parse(await readFile(status.latest.manifest_path, 'utf8'));
+  assert.equal(peak, 2, 'multiple files hash concurrently, bounded by configuration');
+  assert.equal(manifest.summary.hash_complete, true);
+  assert.equal(manifest.summary.hashed_files, 3);
+  assert.deepEqual(manifest.files.map(file => file.path), ['README.md', 'case/Docket-Order-Exhibit.txt', 'case/copy.txt']);
+  assert.equal(manifest.duplicates[0].copies, 2);
+  for (const file of manifest.files) {
+    const actual = createHash('sha256').update(await readFile(path.join(root, file.path))).digest('hex');
+    assert.equal(file.sha256, actual, `digest mismatch for ${file.path}`);
+  }
+});
+
+test('concurrent scan rejects files changed during hashing instead of publishing false completeness', async () => {
+  const root = await fixture();
+  const automation = new WorkspaceAutomation({
+    workspaceRoot: root,
+    env: { PRO_CODE_HASH_CONCURRENCY: '3' },
+    hashFile: async file => {
+      if (file.endsWith('README.md')) await writeFile(file, 'changed while being hashed');
+      return createHash('sha256').update(await readFile(file)).digest('hex');
+    },
+  });
+  await assert.rejects(() => automation.run('mutating-file'), /Workspace scan incomplete: 1 files could not be hashed reliably/);
   assert.equal(automation.getStatus().state, 'error');
   assert.equal(automation.getStatus().latest, null);
 });
