@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { test } from 'node:test';
 import { analyzeCodebase } from './code-intelligence.mjs';
@@ -66,3 +69,17 @@ test('rejects unknown impact targets rather than fabricating an empty graph', as
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+
+test('CLI analyzes a real fixture and writes its machine-readable report in a new directory', async () => {
+  const root = await fixture({ 'one.ts': 'export const value = 42;\n' });
+  try {
+    const cli = fileURLToPath(new URL('./code-intelligence.mjs', import.meta.url));
+    const { stdout } = await promisify(execFile)(process.execPath, [cli, '--root', root, '--impact', 'src/one.ts', '--out', 'reports/impact.json', '--fail-on-diagnostics']);
+    const output = await readFile(path.join(root, 'reports', 'impact.json'), 'utf8');
+    assert.equal(stdout, output);
+    const report = JSON.parse(output);
+    assert.equal(report.operation, 'typescript_program_analysis');
+    assert.deepEqual(report.impact.affected_files, ['src/one.ts']);
+    assert.equal(report.findings.diagnostic_count, 0);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

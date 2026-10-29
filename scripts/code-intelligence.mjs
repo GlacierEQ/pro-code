@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -124,6 +124,7 @@ if (invokedFile) {
     if (options.out) {
       const destination = path.resolve(options.root, options.out);
       if (relativeWithin(path.resolve(options.root), destination) === null) throw new Error('Output path must stay inside workspace');
+      await mkdir(path.dirname(destination), { recursive: true });
       await writeFile(destination, json);
     }
     process.stdout.write(json);
