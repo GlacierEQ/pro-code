@@ -105,7 +105,9 @@ function duplicates(files) {
   for (const file of files) {
     if (!file.sha256) continue;
     const key = `${file.sha256}:${file.size}`;
-    grouped.set(key, [...(grouped.get(key) ?? []), file.path]);
+    const paths = grouped.get(key);
+    if (paths) paths.push(file.path);
+    else grouped.set(key, [file.path]);
   }
   return [...grouped.entries()]
     .filter(([, paths]) => paths.length > 1)
@@ -156,7 +158,7 @@ function report(manifest) {
 }
 
 export class WorkspaceAutomation {
-  constructor({ workspaceRoot = process.cwd(), outputDir, env = process.env, now = () => new Date() } = {}) {
+  constructor({ workspaceRoot = process.cwd(), outputDir, env = process.env, now = () => new Date(), hashFile = sha256 } = {}) {
     this.workspaceRoot = path.resolve(workspaceRoot);
     this.outputDir = path.resolve(outputDir ?? env.PRO_CODE_RUNTIME_DIR ?? path.join(this.workspaceRoot, '.pro-code', 'runtime'));
     this.manifestPath = path.join(this.outputDir, 'workspace-manifest.json');
@@ -166,6 +168,8 @@ export class WorkspaceAutomation {
     this.intervalMs = positiveInteger(env.PRO_CODE_AUTOMATION_INTERVAL_MS, 300_000, 5_000, 86_400_000);
     this.maxFiles = positiveInteger(env.PRO_CODE_MAX_FILES, 25_000, 1, 1_000_000);
     this.maxHashBytes = positiveInteger(env.PRO_CODE_MAX_HASH_BYTES, 268_435_456, 1, 10_737_418_240);
+    this.hashConcurrency = positiveInteger(env.PRO_CODE_HASH_CONCURRENCY, 4, 1, 16);
+    this.hashFile = hashFile;
     this.now = now;
     this.timer = null;
     this.inFlight = null;
@@ -309,6 +313,7 @@ export class WorkspaceAutomation {
 
   async scanFiles() {
     const files = [];
+    const toHash = [];
     const pending = [this.workspaceRoot];
     while (pending.length) {
       const directory = pending.pop();
@@ -340,33 +345,51 @@ export class WorkspaceAutomation {
         }
         const relativePath = path.relative(this.workspaceRoot, absolutePath).split(path.sep).join('/');
         const category = classify(relativePath);
-        let fileHash = null;
-        let hashStatus = metadata.size > this.maxHashBytes ? 'skipped_size_limit' : 'hashed';
-        if (hashStatus === 'hashed') {
-          try {
-            fileHash = await sha256(absolutePath);
-            const afterHash = await stat(absolutePath);
-            if (afterHash.size !== metadata.size || afterHash.mtimeMs !== metadata.mtimeMs) {
-              metadata = afterHash;
-              fileHash = null;
-              hashStatus = 'unstable';
-            }
-          } catch {
-            fileHash = null;
-            hashStatus = 'failed';
-          }
-        }
-        files.push({
+        const record = {
           path: relativePath,
           category,
           size: metadata.size,
           modified_at: metadata.mtime.toISOString(),
-          sha256: fileHash,
-          hash_status: hashStatus,
+          sha256: null,
+          hash_status: metadata.size > this.maxHashBytes ? 'skipped_size_limit' : 'pending',
           evidence: rank(relativePath, category),
-        });
+        };
+        files.push(record);
+        if (record.hash_status === 'pending') toHash.push({ absolutePath, metadata, record });
       }
     }
+
+    // Bounded file I/O overlaps independent hashes, without unbounded open streams.
+    // Every eligible file is still fully hashed on every scan (no metadata-only cache).
+    let cursor = 0;
+    async function worker(scan) {
+      while (cursor < toHash.length) {
+        const task = toHash[cursor++];
+        const { absolutePath, record } = task;
+        try {
+          const digest = await scan.hashFile(absolutePath);
+          const afterHash = await stat(absolutePath);
+          if (afterHash.size !== task.metadata.size
+            || afterHash.mtimeMs !== task.metadata.mtimeMs
+            || afterHash.ctimeMs !== task.metadata.ctimeMs
+            || afterHash.ino !== task.metadata.ino
+            || afterHash.dev !== task.metadata.dev) {
+            record.size = afterHash.size;
+            record.modified_at = afterHash.mtime.toISOString();
+            record.hash_status = 'unstable';
+          } else {
+            record.sha256 = digest;
+            record.hash_status = 'hashed';
+          }
+        } catch {
+          record.hash_status = 'failed';
+        }
+      }
+    }
+    await Promise.all(Array.from(
+      { length: Math.min(this.hashConcurrency, toHash.length) },
+      () => worker(this),
+    ));
     return files.sort((a, b) => a.path.localeCompare(b.path));
   }
 
