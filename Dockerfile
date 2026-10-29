@@ -9,6 +9,8 @@ RUN npm run lint && npm run typecheck && npm test && npm run build
 # The Nexus runtime uses Node built-ins; neither npm nor source tests are
 # needed inside the running image.
 FROM node:22-alpine
+LABEL org.opencontainers.image.source="https://github.com/GlacierEQ/pro-code" \
+      org.opencontainers.image.description="PRO-CODE governed local engineering operator"
 WORKDIR /app
 ENV NODE_ENV=production \
     PRO_CODE_HOST=0.0.0.0 \
