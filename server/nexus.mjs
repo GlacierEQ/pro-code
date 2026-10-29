@@ -113,6 +113,11 @@ async function buildResult(envelope, now, automation) {
   const execution = automation
     ? await automation.executeCapability(envelope.capability, envelope.params)
     : { handled: false, summary: null };
+  const handled = execution.handled === true;
+  if (handled && !nonEmpty(execution.summary?.manifest_id)) {
+    throw new Error('Automation claimed completion without a verified workspace manifest');
+  }
+  const status = handled ? 'succeeded' : 'unsupported';
   const receipt = {
     receipt_id: `receipt-${envelope.task_id}`,
     schema_version: '1.0.0',
@@ -122,15 +127,22 @@ async function buildResult(envelope, now, automation) {
     idempotency_key: envelope.idempotency_key,
     worker: envelope.worker,
     capability: envelope.capability,
-    status: 'succeeded',
+    status,
     parameter_count: Object.keys(envelope.params).length,
-    automation_handled: execution.handled,
-    completed_at: now().toISOString(),
+    automation_handled: handled,
+    recorded_at: now().toISOString(),
   };
-  const result = execution.handled
-    ? `${envelope.capability} refreshed workspace intelligence for ${envelope.case_id}; manifest ${execution.summary?.manifest_id ?? 'pending'}. Receipt ${receipt.receipt_id}.`
-    : `${envelope.capability} accepted by ${envelope.worker} for ${envelope.case_id}; no local automation handler is registered. Receipt ${receipt.receipt_id}.`;
-  return { status: 'succeeded', success: true, result, receipt, automation: execution };
+  const result = handled
+    ? `Workspace intelligence refreshed through ${envelope.capability} for ${envelope.case_id}; manifest ${execution.summary.manifest_id}. Receipt ${receipt.receipt_id}. This confirms workspace inventory, not completion of other domain work.`
+    : `No local executor is registered for ${envelope.capability} on ${envelope.worker}; nothing was executed. Receipt ${receipt.receipt_id}.`;
+  return {
+    status,
+    success: handled,
+    result,
+    ...(handled ? {} : { error: result }),
+    receipt,
+    automation: execution,
+  };
 }
 
 function memoryDirectory(target, env) {
@@ -216,6 +228,9 @@ export function createNexusHandler({ env = process.env, now = () => new Date(), 
         }
         const body = await readJson(request);
         const status = await automation.run(nonEmpty(body.reason) ? body.reason : 'api');
+        if (status.state !== 'idle' || !nonEmpty(status.latest?.manifest_id)) {
+          throw new Error(status.last_error ?? 'Workspace automation did not produce a verified manifest');
+        }
         sendJson(response, 200, { status: 'succeeded', success: true, automation: status });
         return;
       }
@@ -237,14 +252,25 @@ export function createNexusHandler({ env = process.env, now = () => new Date(), 
             sendJson(response, 409, { status: 'rejected', success: false, error: 'Idempotency key was already used with a different envelope' });
             return;
           }
-          sendJson(response, 200, existing.payload, { 'X-Idempotent-Replay': 'true' });
+          const original = existing.payload ?? await existing.inFlight;
+          sendJson(response, original.success ? 200 : 501, original, { 'X-Idempotent-Replay': 'true' });
           return;
         }
-        const payload = await buildResult(envelope, now, automation);
+        // Register the in-flight operation before awaiting it: simultaneous replays
+        // share one execution, and conflicting payloads cannot race past admission.
+        const inFlight = buildResult(envelope, now, automation);
+        idempotency.set(key, { envelopeDigest, inFlight });
+        let payload;
+        try {
+          payload = await inFlight;
+        } catch (error) {
+          idempotency.delete(key);
+          throw error;
+        }
         idempotency.set(key, { envelopeDigest, payload });
         receipts.unshift(payload.receipt);
         if (receipts.length > MAX_RECEIPTS) receipts.length = MAX_RECEIPTS;
-        sendJson(response, 200, payload);
+        sendJson(response, payload.success ? 200 : 501, payload);
         return;
       }
 

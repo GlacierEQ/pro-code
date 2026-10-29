@@ -40,8 +40,8 @@ function envelope(overrides = {}) {
   };
 }
 
-async function dispatch(body) {
-  return fetch(`${baseUrl}/api/v1/workers/${body.worker}/execute`, {
+async function dispatch(body, targetUrl = baseUrl) {
+  return fetch(`${targetUrl}/api/v1/workers/${body.worker}/execute`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -63,23 +63,24 @@ test('health exposes the complete local worker runtime', async () => {
   assert.ok(body.workers.includes('case-analyzer'));
 });
 
-test('dispatch validates and executes a case-scoped capability', async () => {
+test('registered capability without an executor cannot claim success', async () => {
   const response = await dispatch(envelope());
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 501);
   const body = await response.json();
-  assert.equal(body.status, 'succeeded');
-  assert.equal(body.success, true);
+  assert.equal(body.status, 'unsupported');
+  assert.equal(body.success, false);
+  assert.equal(body.receipt.status, 'unsupported');
   assert.equal(body.receipt.case_id, 'CASE-TEST-1');
   assert.equal(body.receipt.capability, 'analyzeCase');
-  assert.match(body.result, /Receipt receipt-task-1/);
+  assert.match(body.error, /nothing was executed/);
 });
 
 test('identical idempotent replay returns the original receipt', async () => {
   const body = envelope({ task_id: 'task-replay', idempotency_key: 'idem-replay' });
   const first = await dispatch(body);
   const second = await dispatch(body);
-  assert.equal(first.status, 200);
-  assert.equal(second.status, 200);
+  assert.equal(first.status, 501);
+  assert.equal(second.status, 501);
   assert.equal(second.headers.get('x-idempotent-replay'), 'true');
   assert.deepEqual(await second.json(), await first.json());
 });
@@ -87,12 +88,80 @@ test('identical idempotent replay returns the original receipt', async () => {
 test('idempotency key reuse with a different envelope fails closed', async () => {
   const first = envelope({ task_id: 'task-conflict-1', idempotency_key: 'idem-conflict' });
   const second = envelope({ task_id: 'task-conflict-2', idempotency_key: 'idem-conflict' });
-  assert.equal((await dispatch(first)).status, 200);
+  assert.equal((await dispatch(first)).status, 501);
   const response = await dispatch(second);
   assert.equal(response.status, 409);
   const body = await response.json();
   assert.equal(body.success, false);
   assert.match(body.error, /different envelope/);
+});
+
+test('concurrent identical dispatches execute once and conflicting replays reject', async () => {
+  let invoked = 0;
+  let release;
+  let signalStarted;
+  const started = new Promise(resolve => { signalStarted = resolve; });
+  const held = new Promise(resolve => { release = resolve; });
+  const runtime = await startNexusServer({
+    host: '127.0.0.1',
+    port: 0,
+    automation: {
+      async executeCapability() {
+        invoked += 1;
+        signalStarted();
+        await held;
+        return { handled: true, summary: { manifest_id: 'sha256-concurrency-fixture' } };
+      },
+    },
+  });
+  try {
+    const body = envelope({ task_id: 'task-concurrent', idempotency_key: 'idem-concurrent' });
+    const first = dispatch(body, runtime.url);
+    await started;
+    const replay = dispatch(body, runtime.url);
+    const conflict = await dispatch(envelope({
+      task_id: 'task-conflicting',
+      idempotency_key: 'idem-concurrent',
+    }), runtime.url);
+    assert.equal(conflict.status, 409);
+    release();
+    const [firstResponse, replayResponse] = await Promise.all([first, replay]);
+    assert.equal(firstResponse.status, 200);
+    assert.equal(replayResponse.status, 200);
+    assert.equal(invoked, 1);
+    assert.equal(replayResponse.headers.get('x-idempotent-replay'), 'true');
+    assert.deepEqual(await replayResponse.json(), await firstResponse.json());
+  } finally {
+    release();
+    await new Promise((resolve, reject) => runtime.server.close(error => error ? reject(error) : resolve()));
+  }
+});
+
+test('failed execution is not cached as a successful idempotent receipt', async () => {
+  let invoked = 0;
+  const runtime = await startNexusServer({
+    host: '127.0.0.1',
+    port: 0,
+    automation: {
+      async executeCapability() {
+        invoked += 1;
+        if (invoked === 1) throw new Error('fixture execution failure');
+        return { handled: true, summary: { manifest_id: 'sha256-recovery-fixture' } };
+      },
+    },
+  });
+  try {
+    const body = envelope({ task_id: 'task-retry', idempotency_key: 'idem-retry' });
+    const failure = await dispatch(body, runtime.url);
+    assert.equal(failure.status, 500);
+    assert.equal((await failure.json()).success, false);
+    const recovered = await dispatch(body, runtime.url);
+    assert.equal(recovered.status, 200);
+    assert.equal((await recovered.json()).status, 'succeeded');
+    assert.equal(invoked, 2);
+  } finally {
+    await new Promise((resolve, reject) => runtime.server.close(error => error ? reject(error) : resolve()));
+  }
 });
 
 test('missing case context and unknown capability are rejected', async () => {
