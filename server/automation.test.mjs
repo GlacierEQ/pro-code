@@ -68,14 +68,19 @@ test('subsequent run records added modified and removed files', async () => {
 test('capability execution runs the useful automation pipeline', async () => {
   const root = await fixture();
   const automation = new WorkspaceAutomation({ workspaceRoot: root, env: {} });
-  const handled = await automation.executeCapability('analyzeCase', { source: 'test' });
+  const handled = await automation.executeCapability('inventoryWorkspace', { source: 'test' });
   assert.equal(handled.handled, true);
+  assert.equal(handled.operation, 'workspace_inventory');
+  assert.equal(handled.objective_completed, true);
+  assert.equal(handled.verified, true);
+  assert.equal(handled.summary.inventory_complete, true);
   assert.equal(handled.parameters_received, 1);
   assert.ok(handled.summary.file_count >= 3);
   assert.match(handled.artifacts.report, /workspace-report\.md$/);
 
-  const passive = await automation.executeCapability('executeAPI', {});
+  const passive = await automation.executeCapability('analyzeCase', {});
   assert.equal(passive.handled, false);
+  assert.equal((await automation.executeCapability('generateBatchMotions', {})).handled, false);
   assert.ok(passive.summary);
 });
 
@@ -90,4 +95,12 @@ test('disabled scheduler stays disabled but manual run remains available', async
   const status = await automation.run('manual');
   assert.equal(status.state, 'idle');
   assert.equal(status.run_count, 1);
+});
+
+test('incomplete max-file scan fails rather than claiming a complete manifest', async () => {
+  const root = await fixture();
+  const automation = new WorkspaceAutomation({ workspaceRoot: root, env: { PRO_CODE_MAX_FILES: '2' } });
+  await assert.rejects(() => automation.run('test'), /scan incomplete: exceeded PRO_CODE_MAX_FILES/);
+  assert.equal(automation.getStatus().state, 'error');
+  assert.equal(automation.getStatus().latest, null);
 });
