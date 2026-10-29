@@ -45,7 +45,6 @@ jobs:
     timeout-minutes: 25
     permissions:
       contents: read
-      packages: write
     steps:
       - name: Check out exact revision
         uses: actions/checkout@v4
@@ -142,30 +141,62 @@ jobs:
         if: always()
         run: docker rm --force pro-code-smoke || true
 
-      - name: Authenticate for GitHub Container Registry only on main
+
+      - name: Export the smoke-tested image for the publish job
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        run: docker save pro-code:verified --output pro-code-verified.tar
+
+      - name: Upload the tested OCI image
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pro-code-verified-image
+          path: pro-code-verified.tar
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish verified OCI artifact
+    needs: container
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Retrieve the exact image that passed the smoke test
+        uses: actions/download-artifact@v4
+        with:
+          name: pro-code-verified-image
+
+      - name: Load verified image
+        run: docker load --input pro-code-verified.tar
+
+      - name: Authenticate to GitHub Container Registry
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
 
-      - name: Publish the exact smoke-tested image
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+      - name: Publish revision tag and verify registry digest
         run: |
           set -euo pipefail
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
-          immutable="$image:sha-$GITHUB_SHA"
-          docker tag pro-code:verified "$immutable"
-          docker push "$immutable"
-          digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$immutable")"
+          revision="$image:sha-$GITHUB_SHA"
+          docker tag pro-code:verified "$revision"
+          push_output="$(docker push "$revision")"
+          printf '%s\n' "$push_output"
+          digest="$(printf '%s\n' "$push_output" | sed -n 's/.*digest: \\(sha256:[0-9a-f]*\\).*/\\1/p' | tail -n 1)"
           test -n "$digest"
+          docker manifest inspect "$image@$digest" >/dev/null
           docker tag pro-code:verified "$image:main"
           docker push "$image:main"
           {
             echo "### Verified image published"
             echo "- Source commit: \`$GITHUB_SHA\`"
-            echo "- Revision tag: \`$immutable\`"
-            echo "- Registry digest: \`$digest\`"
+            echo "- Revision tag: \`$revision\`"
+            echo "- Immutable registry digest: \`$image@$digest\`"
             echo "- Mutable convenience tag: \`$image:main\`"
-            echo "- Verification: image build, Node tests, live HTTP and fail-closed dispatch"
-            echo "- This is an OCI image release, not a claim of remote service deployment."
+            echo "- Verification: lint, types, tests, live container, HTTP smoke, registry readback"
+            echo "- OCI image release only; external service deployment is a separate operation."
           } >> "$GITHUB_STEP_SUMMARY"
