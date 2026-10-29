@@ -104,3 +104,52 @@ test('resolves import type references and literal dynamic imports with options',
     assert.equal(result.files.find(x => x.path === 'src/dynamic.ts')?.imports[0].status, 'internal');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test('indexes CommonJS require and require.resolve as transitive dependency edges', async () => {
+  const root = await fixture({
+    'base.ts': 'export const answer = 42;\n',
+    'middle.ts': "declare const require: (name: string) => any; const base = require('./base'); export const doubled = base.answer * 2;\n",
+    'main.ts': "declare const require: { resolve(name: string): string }; export const location = require.resolve('./middle');\n",
+  });
+  try {
+    const result = await analyzeCodebase({ root, impact: 'src/base.ts' });
+    assert.deepEqual(result.impact.affected_files, ['src/base.ts', 'src/main.ts', 'src/middle.ts']);
+    assert.equal(result.scope.analysis_complete, true);
+    assert.equal(result.findings.diagnostic_count, 0);
+    assert.equal(result.files.find(x => x.path === 'src/middle.ts').imports[0].kind, 'require');
+    assert.equal(result.files.find(x => x.path === 'src/main.ts').imports[0].kind, 'require-resolve');
+    assert.equal(result.files.find(x => x.path === 'src/main.ts').imports[0].target, 'src/middle.ts');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('reports dynamic require paths as incomplete and CLI can reject an incomplete graph', async () => {
+  const root = await fixture({
+    'dynamic.ts': "declare const require: (name: string) => unknown; export function load(name: string) { return require(name); }\n",
+  });
+  try {
+    const result = await analyzeCodebase({ root });
+    assert.equal(result.findings.dynamic_unknown_count, 1);
+    assert.equal(result.scope.analysis_complete, false);
+    assert.equal(result.files[0].imports[0].kind, 'require');
+    assert.equal(result.files[0].imports[0].status, 'dynamic-unknown');
+    const cli = fileURLToPath(new URL('./code-intelligence.mjs', import.meta.url));
+    await assert.rejects(
+      promisify(execFile)(process.execPath, [cli, '--root', root, '--out', 'reports/impact.json', '--fail-on-incomplete']),
+      error => error.code === 1,
+    );
+    const report = JSON.parse(await readFile(path.join(root, 'reports/impact.json'), 'utf8'));
+    assert.equal(report.scope.analysis_complete, false);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('does not falsely mark unresolved static CommonJS imports as complete', async () => {
+  const root = await fixture({
+    'broken.ts': "declare const require: (name: string) => unknown; export const missing = require('./absent');\n",
+  });
+  try {
+    const result = await analyzeCodebase({ root });
+    assert.equal(result.findings.unresolved_import_count, 1);
+    assert.equal(result.scope.analysis_complete, false);
+    assert.equal(result.files[0].imports[0].status, 'unresolved');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
