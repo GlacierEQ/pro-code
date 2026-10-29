@@ -11,7 +11,7 @@
 5. If the card is declined, call `declined` and stop that action. Do not restart it without a new user directive and plan identity.
 6. `VERIFIED` means the expected remote state was observed after a recorded invocation; it cannot prove which client caused it. `ALREADY_SATISFIED` means the remote outcome was observed without a journal-recorded invocation (which can include a session-lost invocation). Neither means that every downstream deployment, release, or business objective is complete.
 
-Only non-secret, bounded intent fields are accepted; readback is stored as a digest rather than as full provider payload. The journal deliberately uses a caller-supplied SQLite path, not a machine-specific hardcoded home directory. SQLite WAL, synchronous full transactions and unique provider invocation IDs support process restart and concurrent callers on one host. **Network-filesystem / multi-host exactly-once delivery is not proven.** Store one journal on a locally reliable disk per executing host.
+Only non-secret, bounded intent fields are accepted; readback is stored as a digest rather than as full provider payload. The journal deliberately uses a caller-supplied SQLite path, not a machine-specific hardcoded home directory. SQLite WAL, synchronous full write transactions, concurrent non-locking reads, hex-validated expected PR head IDs and unique provider invocation IDs support process restart and concurrent callers on one host. **Network-filesystem / multi-host exactly-once delivery is not proven.** Store one journal on a locally reliable disk per executing host.
 
 ## Example (readback-only illustration; no GitHub write is initiated)
 
