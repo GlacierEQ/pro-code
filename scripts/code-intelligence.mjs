@@ -33,12 +33,14 @@ function sourceImports(sourceFile) {
     if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteralLike(node.moduleSpecifier)) {
       const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
       push(node.moduleSpecifier.text, ts.isExportDeclaration(node) ? 're-export' : 'import', line);
+    } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument) && ts.isStringLiteralLike(node.argument.literal)) {
+      push(node.argument.literal.text, 'import-type', sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1);
     } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
       const expr = node.moduleReference.expression;
       if (expr && ts.isStringLiteralLike(expr)) push(expr.text, 'import-equals', sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1);
     } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
       const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
-      push(node.arguments.length === 1 && ts.isStringLiteralLike(node.arguments[0]) ? node.arguments[0].text : null, 'dynamic-import', line);
+      push(node.arguments.length >= 1 && ts.isStringLiteralLike(node.arguments[0]) ? node.arguments[0].text : null, 'dynamic-import', line);
     }
     ts.forEachChild(node, visit);
   }
