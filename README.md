@@ -47,6 +47,14 @@ flowchart LR
     CI --> Native
 ```
 
+## Executable semantic code knowledge
+
+`npm run code:knowledge -- --symbol workersManager --definition-file src/workers.ts --out .pro-code/runtime/symbols.json` now queries **compiler-resolved symbol identity**, rather than matching raw text. It reports the exact declarations, type information, reference sites with file/line/column evidence, and independently identified symbols with the same spelling. Its `--definition-file` selector narrows ambiguity without hiding references in other modules. Optionally combine with `--impact src/workers.ts` to include reverse-dependency impact from the same TypeScript program.
+
+`npm run test:code-knowledge` exercises real compiler behavior, detects false identity merging, preserves compiler diagnostics, tests missing-symbol failure, and executes the CLI in a fresh fixture. The standard `npm test` also runs this suite and queries `workersManager` on the real repo.
+
+Scope is honest: static TypeScript project symbols and configured files, **not** live runtime data flow, arbitrary reflection, all languages, or a replacement for CodeQL/security analysis. Source code is the authority; research references inform engineering choices rather than certify execution.
+
 ## Executable TypeScript code intelligence
 
 The repository includes a real compiler-backed analysis command, rather than a prose-only 'code intelligence' claim:
