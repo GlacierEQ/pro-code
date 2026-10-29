@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
 import { memory } from './memory';
 import { NOTION_WORKERS, workersManager } from './workers';
 import type { WorkerConfig } from './workers';
@@ -8,32 +7,15 @@ import './App.css';
 
 const ACTIVE_CASE_ID = import.meta.env.VITE_CASE_ID?.trim() || 'CASE-LOCAL-DEMO';
 
-type BtnKey = 'omniCrawl' | 'apexBoot' | 'megaPdf' | 'juggernautOffice' | 'quantumSovereign' | 'stealthSonic' | 'aeon777' | 'forensicPipeline';
-
+type BtnKey = 'inventoryWorkspace';
 type TriggerConfig = {
-  label: string;
-  capability: string;
-  icon: string;
-  tier: 'apex' | 'sovereign' | 'tactical';
+  label: string; capability: string; icon: string; tier: 'tactical';
 };
-
 const TRIGGERS: Record<BtnKey, TriggerConfig> = {
-  quantumSovereign: { label: 'QUANTUM-SOVEREIGN Boot', capability: 'modelMaximize', icon: '⟁', tier: 'apex' },
-  apexBoot: { label: 'APEX Unified Boot', capability: 'runApexMaximize', icon: '🚀', tier: 'apex' },
-  stealthSonic: { label: 'Stealth Sonic → GHOST-EMBER', capability: 'automationDispatch', icon: '🎤', tier: 'sovereign' },
-  aeon777: { label: 'AEON-777 Forensic Pipeline', capability: 'helixAutomation', icon: '🎯', tier: 'sovereign' },
-  forensicPipeline: { label: 'Full Forensic Audio + Motions', capability: 'generateBatchMotions', icon: '⚖️', tier: 'sovereign' },
-  omniCrawl: { label: 'Juggernaut Omni-Crawl', capability: 'crawlDatabase', icon: '🕷', tier: 'tactical' },
-  megaPdf: { label: 'MEGA-PDF Reaper', capability: 'generateReport', icon: '📄', tier: 'tactical' },
-  juggernautOffice: { label: 'JUGGERNAUT-OFFICE', capability: 'organizeMemory', icon: '📁', tier: 'tactical' },
+  inventoryWorkspace: {
+    label: 'Inventory Workspace', capability: 'inventoryWorkspace', icon: '📦', tier: 'tactical',
+  },
 };
-
-const QS_AGENTS = [
-  { id: 'GHOST-EMBER', model: 'Gemma 27B', role: 'Audio forensics + legal analysis', local: true, color: '#34d399' },
-  { id: 'IRON-TALON', model: 'Ollama MCP', role: 'Voice fingerprinting + orchestration', local: true, color: '#60a5fa' },
-  { id: 'ORACLE-NET', model: 'Perplexity', role: 'Federal statute research', local: false, color: '#a78bfa' },
-  { id: 'ROOT-NEXUS', model: 'Aspen Grove', role: 'Persistent memory + GitHub sync', local: true, color: '#fb923c' },
-];
 
 const ALL_CAPABILITIES = NOTION_WORKERS.flatMap(worker =>
   worker.capabilities.map(capability => ({ cap: capability, worker: worker.name })),
@@ -55,7 +37,7 @@ export default function App() {
   const [capLoading, setCapLoading] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [showLog, setShowLog] = useState(false);
-  const [selectedTab, setSelectedTab] = useState<'workers' | 'agents' | 'capabilities'>('workers');
+  const [selectedTab, setSelectedTab] = useState<'workers' | 'capabilities'>('workers');
   const [, setWorkerRevision] = useState(0);
   const previousOnline = useRef<boolean | null>(null);
   const { health, checking, recheck } = useWorkerHealth();
@@ -63,6 +45,8 @@ export default function App() {
   const workers = workersManager.getStatus();
   const stats = workersManager.getStats();
   const nexusOnline = health?.status === 'ok';
+  const executableCapabilities = new Set(health?.supportedCapabilities ?? []);
+  const runnableCount = executableCapabilities.size;
 
   const addLog = useCallback((msg: string, level: LogEntry['level'] = 'info') => {
     setLogs(previous => [{ ts: timestamp(), msg, level }, ...previous].slice(0, 120));
@@ -132,8 +116,8 @@ export default function App() {
       source: 'command-console',
       requested_at: new Date().toISOString(),
     });
-    const status = result?.success
-      ? result.result ?? 'Completed'
+    const status = result?.success && result.objectiveCompleted === true
+      ? result.result ?? 'Verified'
       : result?.error?.message ?? 'Dispatch failed';
     setBtnStatus(previous => new Map(previous).set(key, status));
     setBtnLoading(previous => new Map(previous).set(key, false));
@@ -144,7 +128,7 @@ export default function App() {
   );
 
   const nexusStatus = checking && !health ? 'checking' : nexusOnline ? 'online' : 'offline';
-  const tierGroups = (['apex', 'sovereign', 'tactical'] as const).map(tier => ({
+  const tierGroups = (['tactical'] as const).map(tier => ({
     tier,
     keys: (Object.keys(TRIGGERS) as BtnKey[]).filter(key => TRIGGERS[key].tier === tier),
   }));
@@ -161,13 +145,13 @@ export default function App() {
           <div>
             <p className="eyebrow">GlacierEQ · Governed Local Runtime</p>
             <h1>Pro&#8209;Code</h1>
-            <p className="lede">Runnable case-scoped worker dispatch with idempotent receipts, local memory, and explicit runtime health.</p>
+            <p className="lede">Verified local operations with explicit objective evidence. A declared worker is not an executable capability.</p>
           </div>
         </div>
         <div className="hero__meta">
           <div className={`status-pill nexus-${nexusStatus}`} title={`Configured Nexus API — ${nexusStatus}`}>
             <span className="status-dot" />
-            {nexusStatus === 'checking' ? 'Connecting…' : nexusStatus === 'online' ? 'Nexus Live' : 'Nexus Offline'}
+            {nexusStatus === 'checking' ? 'Connecting…' : nexusStatus === 'online' ? `Nexus Online · ${runnableCount} executable` : 'Nexus Offline'}
           </div>
           <button className="log-toggle" onClick={() => setShowLog(value => !value)} aria-pressed={showLog}>
             {showLog ? 'Hide Log' : 'Show Log'}
@@ -198,7 +182,8 @@ export default function App() {
       <section className="stats" aria-label="Runtime metrics">
         {[
           { label: 'Memory', value: memoryCount },
-          { label: 'Workers', value: stats.total },
+          { label: 'Declared roles', value: stats.total },
+          { label: 'Verified workers', value: stats.verified },
           { label: 'Running', value: stats.running, highlight: stats.running > 0 },
           { label: 'Total Runs', value: stats.totalRuns },
           { label: 'Errors', value: stats.error, highlight: stats.error > 0, danger: true },
@@ -211,6 +196,7 @@ export default function App() {
       </section>
 
       <section className="trigger-console" aria-labelledby="triggers-heading">
+        <p className="qs-caption">Only capabilities explicitly announced by this live runtime are executable. Unsupported buttons are unavailable, not completed.</p>
         <div className="section-header">
           <h2 id="triggers-heading"><span className="section-icon">⟁</span> Command Console</h2>
           <button className="log-toggle" onClick={() => void recheck()} disabled={checking}>
@@ -230,13 +216,15 @@ export default function App() {
                     <button
                       className={`trigger-btn trigger-btn--${tier}`}
                       onClick={() => void triggerNexus(key)}
-                      disabled={loading || !nexusOnline}
+                      disabled={loading || !nexusOnline || !executableCapabilities.has(trigger.capability)}
+                      title={!executableCapabilities.has(trigger.capability) ? 'No verified local executor for this operation' : `Execute ${trigger.capability}`}
                       aria-busy={loading}
                     >
                       <span className="trigger-icon">{loading ? '⏳' : trigger.icon}</span>
                       <span className="trigger-label">{trigger.label}</span>
                     </button>
                     {status && <p className="trigger-status">{status}</p>}
+                    {nexusOnline && !executableCapabilities.has(trigger.capability) && <p className="trigger-status">Not implemented on this runtime</p>}
                   </div>
                 );
               })}
@@ -247,7 +235,7 @@ export default function App() {
 
       <div className="lower-panel">
         <nav className="tab-nav" role="tablist">
-          {(['workers', 'agents', 'capabilities'] as const).map(tab => (
+          {(['workers', 'capabilities'] as const).map(tab => (
             <button
               key={tab}
               role="tab"
@@ -255,7 +243,7 @@ export default function App() {
               className={`tab-btn${selectedTab === tab ? ' tab-btn--active' : ''}`}
               onClick={() => setSelectedTab(tab)}
             >
-              {tab === 'workers' ? `Workers (${stats.total})` : tab === 'agents' ? 'QS Agents' : 'Capabilities'}
+              {tab === 'workers' ? `Declared workers (${stats.total})` : 'Capabilities'}
             </button>
           ))}
         </nav>
@@ -286,8 +274,8 @@ export default function App() {
                           event.stopPropagation();
                           void dispatchCapability(capability);
                         }}
-                        disabled={capLoading || !nexusOnline}
-                        title={`Dispatch ${capability}`}
+                        disabled={capLoading || !nexusOnline || !executableCapabilities.has(capability)}
+                        title={executableCapabilities.has(capability) ? `Execute ${capability}` : 'No local executor registered'}
                       >
                         {capability}
                       </button>
@@ -301,24 +289,6 @@ export default function App() {
                 </div>
               </article>
             ))}
-          </div>
-        )}
-
-        {selectedTab === 'agents' && (
-          <div className="qs-agents" role="tabpanel">
-            <p className="qs-caption">Agent identities are displayed as declared roles; the local runtime reports only verified worker availability.</p>
-            <div className="qs-grid">
-              {QS_AGENTS.map(agent => (
-                <article key={agent.id} className="qs-card" style={{ '--qs-color': agent.color } as CSSProperties}>
-                  <div className="qs-card__top">
-                    <h3>{agent.id}</h3>
-                    <span className={`qs-badge${agent.local ? ' qs-badge--local' : ' qs-badge--cloud'}`}>{agent.local ? 'local' : 'cloud'}</span>
-                  </div>
-                  <p className="qs-model">{agent.model}</p>
-                  <p className="qs-role">{agent.role}</p>
-                </article>
-              ))}
-            </div>
           </div>
         )}
 
@@ -346,8 +316,8 @@ export default function App() {
                   key={`${worker}__${cap}`}
                   className="cap-card"
                   onClick={() => void dispatchCapability(cap)}
-                  disabled={capLoading || !nexusOnline}
-                  title={`Worker: ${worker}`}
+                  disabled={capLoading || !nexusOnline || !executableCapabilities.has(cap)}
+                  title={executableCapabilities.has(cap) ? `Execute on ${worker}` : `${worker}: declared, not executable`}
                 >
                   <span className="cap-name">{cap}</span>
                   <span className="cap-worker">{worker}</span>

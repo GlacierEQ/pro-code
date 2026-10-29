@@ -92,7 +92,7 @@ test('default runtime starts Nexus and completes automatic workspace intelligenc
     assert.equal(inventoryResult.receipt.evidence.inventory_complete, true);
     assert.equal(inventoryResult.receipt.evidence.files_indexed, 1);
     assert.equal(inventoryResult.automation.handled, true);
-    assert.match(inventoryResult.automation.artifacts.report, /workspace-report\\.md$/);
+    assert.match(inventoryResult.automation.artifacts.report, /workspace-report\.md$/);
 
     const statusResponse = await fetch(`${runtime.url}/api/v1/automation/status`);
     assert.equal(statusResponse.status, 200);

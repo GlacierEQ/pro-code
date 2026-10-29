@@ -72,7 +72,7 @@ test('registered capability without an executor cannot claim success', async () 
   assert.equal(body.receipt.status, 'unsupported');
   assert.equal(body.receipt.case_id, 'CASE-TEST-1');
   assert.equal(body.receipt.capability, 'analyzeCase');
-  assert.match(body.error, /nothing was executed/);
+  assert.match(body.error, /requested operation was not executed/);
 });
 
 test('identical idempotent replay returns the original receipt', async () => {

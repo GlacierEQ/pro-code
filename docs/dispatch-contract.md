@@ -36,27 +36,39 @@ The manager returns one of three states:
 
 There is no passthrough or local-success fallback. An offline Nexus remains a failure, and an ambiguous `200` response is not treated as completed work.
 
-## Runtime response
+## Verified runtime response
 
-Nexus must return JSON in one of these explicit success forms:
+The only currently implemented worker action is `inventoryWorkspace` on
+`automation-orchestrator`. A declared worker and capability name are not
+evidence of an executable handler. Nexus exposes `supported_capabilities`
+on `GET /health`; the browser must disable anything else.
 
-```json
-{"status":"succeeded","result":"..."}
-```
+An actual successful response must contain `status: "succeeded"`,
+`success: true`, `objective_completed: true`, the exact operation
+(`workspace_inventory`), a matching request identity in the receipt,
+and concrete manifest evidence including `inventory_complete: true`.
+It may report `hash_complete: false` when some hashes were deliberately
+skipped by size policy; `hash_skipped_files` must be visible.
 
-```json
-{"success":true,"result":"..."}
-```
+A command named `analyzeCase`, `generateBatchMotions`, `modelMaximize`,
+`runApexMaximize`, etc. never succeeds by reusing a workspace inventory.
+They return `501 unsupported` until a real matching executor is built,
+tested and independently verified.
 
-Errors should return a non-2xx status and an `error` string. Nexus must enforce the same case scope, idempotency, auth, signature, and human-review constraints server-side; browser checks alone are not an authorization boundary.
+An incomplete scan (unreadable directory, file-limit exhaustion, or failed/
+unstable hash) raises an execution error rather than producing a full success.
+An inventory verifies inventory work, not the validity of source documents
+or completion of unrelated code, legal, or AI operations.
+
+Errors return a non-2xx status and an `error` string. Nexus must enforce
+case scope, idempotency and server-side constraints independently from the UI.
 
 ## Verified execution and concurrent replay
 
 A capability's registration is not proof that a local executor exists. Nexus returns
 `501 unsupported` with `success: false` and an explicit explanation when no
-handler ran. A completed workspace-intelligence dispatch identifies its manifest
-and describes the work it actually performed; it is not proof of a separate
-domain operation.
+handler ran. The only executable inventory dispatch identifies its manifest and verifies
+its own completion. It is never a substitute for a different objective.
 
 A success acknowledgement requires **both** `status: "succeeded"` and
 `success: true`, along with a string result. Contradictory responses fail.
