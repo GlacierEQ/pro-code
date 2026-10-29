@@ -3,12 +3,14 @@
 
 This repository is linked to `GlacierEQ/monolith`, the shared repository-estate map, unification-instruction, and mega-skill upstream.
 
-Before consequential work, retrieve the current shared package from `GlacierEQ/monolith@main` when GitHub access is available:
+Before consequential work, consult the current **existing** Monolith references when relevant and GitHub access is available. Missing advisory material is a discovery/repair event, not a stop condition:
 
-1. `unification/AGENTS_PERFECT_INSTRUCT.md` — shared execution core.
-2. `unification/README_PERFECT_INSTRUCT.md` — README/evidence-interface standard when README work is relevant.
-3. `catalog/mega_skills.json` — mega-skill index.
-4. `skills/mega-*/SKILL.md` — load only skills materially relevant to the task.
+1. `AGENTS.md` — active Monolith operating contract.
+2. `catalog/AI_DYNAMIC_CAPABILITY_INDEX.json` — capability discovery.
+3. `skills/SKILLS_MAP.md` — live skill map.
+4. `catalog/completion_ownership_contract.json` — ownership of complete outcomes.
+
+These paths were verified at `GlacierEQ/monolith@main` on 2026-10-29. If a file moves, discover its current counterpart and continue against repository-native code; never celebrate stopping because of a broken pointer.
 
 ### Precedence
 

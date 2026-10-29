@@ -115,12 +115,12 @@ test('concurrent identical dispatches execute once and conflicting replays rejec
     },
   });
   try {
-    const body = envelope({ worker: 'automation-orchestrator', capability: 'inventoryWorkspace', task_id: 'task-concurrent', idempotency_key: 'idem-concurrent' });
+    const body = envelope({ worker: 'automation-orchestrator', capability: 'inventoryWorkspace', constraints: { ...envelope().constraints, human_review_required: false }, task_id: 'task-concurrent', idempotency_key: 'idem-concurrent' });
     const first = dispatch(body, runtime.url);
     await started;
     const replay = dispatch(body, runtime.url);
     const conflict = await dispatch(envelope({
-      worker: 'automation-orchestrator', capability: 'inventoryWorkspace',
+      worker: 'automation-orchestrator', capability: 'inventoryWorkspace', constraints: { ...envelope().constraints, human_review_required: false },
       task_id: 'task-conflicting', idempotency_key: 'idem-concurrent',
     }), runtime.url);
     assert.equal(conflict.status, 409);
@@ -151,7 +151,7 @@ test('failed execution is not cached as a successful idempotent receipt', async 
     },
   });
   try {
-    const body = envelope({ worker: 'automation-orchestrator', capability: 'inventoryWorkspace', task_id: 'task-retry', idempotency_key: 'idem-retry' });
+    const body = envelope({ worker: 'automation-orchestrator', capability: 'inventoryWorkspace', constraints: { ...envelope().constraints, human_review_required: false }, task_id: 'task-retry', idempotency_key: 'idem-retry' });
     const failure = await dispatch(body, runtime.url);
     assert.equal(failure.status, 500);
     assert.equal((await failure.json()).success, false);
@@ -236,7 +236,7 @@ test('mismatched executor operation cannot become a success receipt', async () =
   });
   try {
     const response = await dispatch(envelope({
-      worker: 'automation-orchestrator', capability: 'inventoryWorkspace',
+      worker: 'automation-orchestrator', capability: 'inventoryWorkspace', constraints: { ...envelope().constraints, human_review_required: false },
       task_id: 'task-fake', idempotency_key: 'idem-fake',
     }), runtime.url);
     assert.equal(response.status, 500);
@@ -244,4 +244,36 @@ test('mismatched executor operation cannot become a success receipt', async () =
   } finally {
     await new Promise((resolve, reject) => runtime.server.close(error => error ? reject(error) : resolve()));
   }
+});
+
+test('read-only local inventory needs no case ID or approval when scoped to workspace', async () => {
+  const response = await dispatch(envelope({
+    worker: 'automation-orchestrator', capability: 'inventoryWorkspace',
+    case_id: 'workspace:local', task_id: 'task-workspace', trace_id: 'trace-workspace',
+    idempotency_key: 'idem-workspace',
+    constraints: { ...envelope().constraints, human_review_required: false },
+  }));
+  // Bare Nexus has no automation handler; validation succeeds but execution is unsupported.
+  assert.equal(response.status, 501);
+  const body = await response.json();
+  assert.equal(body.status, 'unsupported');
+  assert.equal(body.receipt.case_id, 'workspace:local');
+});
+
+test('risk boundaries remain enforced for local scope and read-only capability', async () => {
+  const inventory = envelope({
+    worker: 'automation-orchestrator', capability: 'inventoryWorkspace',
+    case_id: 'workspace:local', idempotency_key: 'idem-restricted-inventory',
+  });
+  assert.equal((await dispatch(inventory)).status, 422);
+  const legal = envelope({
+    case_id: 'workspace:local', task_id: 'task-illegal-scope', idempotency_key: 'idem-illegal-scope',
+  });
+  assert.equal((await dispatch(legal)).status, 422);
+  const external = envelope({
+    worker: 'automation-orchestrator', capability: 'inventoryWorkspace',
+    case_id: 'workspace:local', idempotency_key: 'idem-external',
+    constraints: { ...envelope().constraints, human_review_required: false, external_actions: 'allowed' },
+  });
+  assert.equal((await dispatch(external)).status, 422);
 });

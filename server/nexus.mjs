@@ -99,11 +99,18 @@ function validateDispatch(routeWorker, envelope, headers) {
   if (!isRecord(envelope.params)) errors.push('params must be an object');
   if (!isRecord(envelope.constraints)) errors.push('constraints must be an object');
   else {
-    if (envelope.constraints.human_review_required !== true) errors.push('human_review_required must be true');
+    if (envelope.capability === 'inventoryWorkspace') {
+      if (envelope.constraints.human_review_required !== false) errors.push('Read-only inventory does not require human review');
+    } else if (envelope.constraints.human_review_required !== true) {
+      errors.push('Review intent is required for non-inventory operations');
+    }
     if (envelope.constraints.external_actions !== 'forbidden') errors.push('external_actions must be forbidden');
     if (!Number.isFinite(envelope.constraints.max_runtime_ms) || envelope.constraints.max_runtime_ms <= 0) errors.push('max_runtime_ms must be positive');
     if (!Array.isArray(envelope.constraints.allowed_tools)) errors.push('allowed_tools must be an array');
     if (!Array.isArray(envelope.constraints.source_refs)) errors.push('source_refs must be an array');
+  }
+  if (envelope.case_id === 'workspace:local' && envelope.capability !== 'inventoryWorkspace') {
+    errors.push('Local workspace scope is only valid for inventory');
   }
   if (headers['x-case-id'] !== envelope.case_id) errors.push('X-Case-Id must match envelope.case_id');
   if (headers['x-trace-id'] !== envelope.trace_id) errors.push('X-Trace-Id must match envelope.trace_id');
