@@ -8,10 +8,13 @@ The Nexus API currently has no trusted remote authentication boundary and permit
 
 ## Run a published, immutable revision locally
 
-After a successful main-branch container release, take the image digest from its GitHub Actions job summary. Prefer the digest over the mutable `main` tag:
+After a successful main-branch container release, use a checkout at the exact intended source revision to resolve its revision tag to a content digest. This pins what Docker runs. The GitHub Actions summary independently records the release digest:
 
 ```sh
-docker pull ghcr.io/glaciereq/pro-code@sha256:REPLACE_WITH_VERIFIED_DIGEST
+image="ghcr.io/glaciereq/pro-code:sha-$(git rev-parse HEAD)"
+docker pull "$image"
+pinned="$(docker image inspect --format '{{index .RepoDigests 0}}' "$image")"
+test "${pinned#*@sha256:}" != "$pinned"
 docker volume create pro-code-data
 docker run --detach --name pro-code \
   --restart unless-stopped \
@@ -19,7 +22,7 @@ docker run --detach --name pro-code \
   --mount type=volume,source=pro-code-data,target=/data \
   --mount type=bind,source="$PWD",target=/workspace,readonly \
   --publish 127.0.0.1:8787:8787 \
-  ghcr.io/glaciereq/pro-code@sha256:REPLACE_WITH_VERIFIED_DIGEST
+  "$pinned"
 curl --fail --silent http://127.0.0.1:8787/health
 ```
 
@@ -29,7 +32,7 @@ The read-only bind mount is optional; replace it with the workspace to inventory
 
 1. Pull request: container builds from the exact checkout and executes source checks plus live HTTP tests. No registry publication occurs from pull requests.
 2. Merge via a non-squash merge after CI succeeds.
-3. Main push: rebuild, rerun the same smoke test, then publish the **same tested local image** as `ghcr.io/glaciereq/pro-code:sha-<full commit>` and `:main`.
+3. Main push: rebuild, rerun the same smoke test, then publish the **same tested local image** as a revision-addressed `sha-` tag and the `main` convenience tag. Registry digests, not tags, provide content immutability.
 4. Record the source SHA, GitHub Actions run, pushed digest, and local /health response. Successful image publication is not proof that an external host was updated.
 5. Remote rollout is separate: pull the immutable digest on the authorized target, restart the service, inspect its real health and contract behavior, and retain the previous working digest for recovery.
 
