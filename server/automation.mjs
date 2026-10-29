@@ -344,14 +344,15 @@ export class WorkspaceAutomation {
           throw new Error(`Workspace scan incomplete: could not stat ${absolutePath}: ${error instanceof Error ? error.message : String(error)}`);
         }
         const relativePath = path.relative(this.workspaceRoot, absolutePath).split(path.sep).join('/');
+        const category = classify(relativePath);
         const record = {
           path: relativePath,
-          category: classify(relativePath),
+          category,
           size: metadata.size,
           modified_at: metadata.mtime.toISOString(),
           sha256: null,
           hash_status: metadata.size > this.maxHashBytes ? 'skipped_size_limit' : 'pending',
-          evidence: rank(relativePath, classify(relativePath)),
+          evidence: rank(relativePath, category),
         };
         files.push(record);
         if (record.hash_status === 'pending') toHash.push({ absolutePath, metadata, record });
