@@ -30,8 +30,10 @@ test('resolves transitive dependents using TypeScript AST and compiler module re
     assert.equal(result.findings.diagnostic_count, 0);
     assert.equal(result.findings.unresolved_import_count, 0);
     const base = result.files.find(file => file.path === 'src/base.ts');
+    assert.ok(base, 'base file should be part of the program');
     assert.deepEqual(base.exports, ['answer']);
     const middle = result.files.find(file => file.path === 'src/middle.ts');
+    assert.ok(middle, 'importing file should be part of the program');
     assert.equal(middle.imports[0].status, 'internal');
     assert.equal(middle.imports[0].target, 'src/base.ts');
   } finally { await rm(root, { recursive: true, force: true }); }
@@ -47,6 +49,7 @@ test('reports exact compiler errors and unresolved imports rather than reporting
     assert.equal(result.findings.unresolved_import_count, 1);
     assert.ok(result.diagnostics.some(x => x.code === 2307));
     assert.ok(result.diagnostics.some(x => x.code === 2322));
+    assert.equal(result.files.length, 1, 'broken source file should be indexed');
     assert.equal(result.files[0].imports[0].status, 'unresolved');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
@@ -56,6 +59,7 @@ test('records nonliteral dynamic imports as incomplete dependency knowledge', as
   try {
     const result = await analyzeCodebase({ root });
     assert.equal(result.findings.dynamic_unknown_count, 1);
+    assert.equal(result.files.length, 1, 'dynamic module should be indexed');
     assert.equal(result.files[0].imports[0].status, 'dynamic-unknown');
     assert.equal(result.files[0].imports[0].target, null);
   } finally { await rm(root, { recursive: true, force: true }); }
@@ -81,5 +85,22 @@ test('CLI analyzes a real fixture and writes its machine-readable report in a ne
     assert.equal(report.operation, 'typescript_program_analysis');
     assert.deepEqual(report.impact.affected_files, ['src/one.ts']);
     assert.equal(report.findings.diagnostic_count, 0);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('resolves import type references and literal dynamic imports with options', async () => {
+  const root = await fixture({
+    'base.ts': 'export interface Answer { n: number }\n',
+    'type-user.ts': "export type Result = import('./base').Answer;\n",
+    'dynamic.ts': "export async function load() { return import('./base', { with: { type: 'javascript' } }); }\n",
+  });
+  try {
+    const result = await analyzeCodebase({ root, impact: 'src/base.ts' });
+    assert.deepEqual(result.impact.affected_files, ['src/base.ts', 'src/dynamic.ts', 'src/type-user.ts']);
+    assert.equal(result.findings.diagnostic_count, 0);
+    assert.equal(result.findings.dynamic_unknown_count, 0);
+    assert.equal(result.files.find(x => x.path === 'src/type-user.ts')?.imports[0].kind, 'import-type');
+    assert.equal(result.files.find(x => x.path === 'src/type-user.ts')?.imports[0].status, 'internal');
+    assert.equal(result.files.find(x => x.path === 'src/dynamic.ts')?.imports[0].status, 'internal');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
