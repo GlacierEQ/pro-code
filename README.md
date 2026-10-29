@@ -57,7 +57,19 @@ npm run code:inspect -- --impact src/workers.ts --out .pro-code/runtime/impact.j
 npm run test:code-intelligence
 ```
 
-This resolves static/re-export and literal dynamic imports using TypeScript's compiler API, enumerates module exports, reports actual compiler diagnostics and unresolved imports, and computes transitive reverse dependencies for the requested file. The report is machine-readable JSON with exact file paths, counts, limitations and compiler version. Nonliteral dynamic imports are explicitly unknown; files outside the configured TypeScript project are not silently counted as analyzed. This is a developer/CI tool using the existing TypeScript dev dependency, not a deployed Nexus worker or a claim that every language is analyzed.
+This resolves static/re-export, literal dynamic imports and CommonJS `require()` / `require.resolve()` dependency edges using TypeScript's compiler API. It enumerates module exports, reports actual compiler diagnostics and unresolved imports, and computes transitive reverse dependencies for the requested file. The report is machine-readable JSON with exact file paths, counts, limitations and compiler version. Nonliteral module paths are explicitly unknown, and unresolved references cause `scope.analysis_complete` to be `false`. Use `--fail-on-incomplete` to return a nonzero exit code for incomplete dependency graphs (in addition to `--fail-on-diagnostics` for compiler errors); a JSON report is still written for investigation. Files outside the configured TypeScript project are not silently counted as analyzed. CommonJS call recognition is syntax-based and may also observe locally shadowed `require` identifiers. This is a developer/CI tool using the existing TypeScript dev dependency, not a deployed Nexus worker or a claim that every language is analyzed.
+
+## Compiler-backed code completion
+
+The `code:complete` CLI uses the actual TypeScript language service and the project's `tsconfig.json`, including cross-file types and imported symbols. Suggestions are deterministic and machine-readable; no model calls, editor extension, file mutations, or autonomous patch claims are implied.
+
+```bash
+npm ci
+npm run code:complete -- --file src/workers.ts --line 1 --column 1 --limit 25
+npm run test:code-completion
+```
+
+Positions use **1-based lines and columns**. Pass `--root` and `--config` for a different project and `--prefix` to filter suggested names. Results include insertion text, replacement spans where offered, compiler version, and flags for snippets and completion entries requiring additional import/code actions. The command rejects target files outside the workspace, symlink escapes, excluded project files, invalid positions, and unbounded output. No result may be represented as a compiled or applied patch; import code actions need a proper editor/integration before insertion.
 
 ## Run it
 
