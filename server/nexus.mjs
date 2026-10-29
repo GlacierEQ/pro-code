@@ -25,8 +25,10 @@ export const WORKER_CAPABILITIES = Object.freeze({
   'case-analyzer': ['analyzeCase', 'consolidateCases', 'caseSync'],
   'motion-generator': ['generateMotion', 'generateBatchMotions', 'motionSync'],
   'ai-executor': ['executeLocalModel', 'handoffFromGemini', 'automationDispatch', 'modelMaximize'],
-  'automation-orchestrator': ['runApexMaximize', 'dispatchWorker', 'helixAutomation', 'notionSync'],
+  'automation-orchestrator': ['runApexMaximize', 'dispatchWorker', 'helixAutomation', 'notionSync', 'inventoryWorkspace'],
 });
+
+const EXECUTABLE_OPERATIONS = Object.freeze({ inventoryWorkspace: 'workspace_inventory' });
 
 const CONTENT_TYPES = Object.freeze({
   '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8',
@@ -110,14 +112,33 @@ function validateDispatch(routeWorker, envelope, headers) {
 }
 
 async function buildResult(envelope, now, automation) {
-  const execution = automation
+  const expectedOperation = EXECUTABLE_OPERATIONS[envelope.capability] ?? null;
+  const execution = expectedOperation && automation
     ? await automation.executeCapability(envelope.capability, envelope.params)
-    : { handled: false, summary: null };
+    : { handled: false };
   const handled = execution.handled === true;
-  if (handled && !nonEmpty(execution.summary?.manifest_id)) {
-    throw new Error('Automation claimed completion without a verified workspace manifest');
+  // A success must prove that the requested operation ran, not merely that
+  // something else (e.g. a workspace scan) was executed.
+  const verified = handled
+    && expectedOperation !== null
+    && execution.operation === expectedOperation
+    && execution.verified === true
+    && execution.objective_completed === true
+    && nonEmpty(execution.summary?.manifest_id)
+    && nonEmpty(execution.artifacts?.manifest)
+    && execution.summary?.inventory_complete === true;
+  if (handled && !verified) {
+    throw new Error('Executor claimed completion without matching operation and verified evidence');
   }
-  const status = handled ? 'succeeded' : 'unsupported';
+  const status = verified ? 'succeeded' : 'unsupported';
+  const evidence = verified ? {
+    manifest_id: execution.summary.manifest_id,
+    manifest_path: execution.artifacts.manifest,
+    files_indexed: execution.summary.file_count,
+    inventory_complete: true,
+    hash_complete: execution.summary.hash_complete === true,
+    hash_skipped_files: execution.summary.hash_skipped_files ?? 0,
+  } : null;
   const receipt = {
     receipt_id: `receipt-${envelope.task_id}`,
     schema_version: '1.0.0',
@@ -127,19 +148,25 @@ async function buildResult(envelope, now, automation) {
     idempotency_key: envelope.idempotency_key,
     worker: envelope.worker,
     capability: envelope.capability,
+    operation: verified ? expectedOperation : null,
+    objective_completed: verified,
+    evidence,
     status,
     parameter_count: Object.keys(envelope.params).length,
-    automation_handled: handled,
+    automation_handled: verified,
     recorded_at: now().toISOString(),
   };
-  const result = handled
-    ? `Workspace intelligence refreshed through ${envelope.capability} for ${envelope.case_id}; manifest ${execution.summary.manifest_id}. Receipt ${receipt.receipt_id}. This confirms workspace inventory, not completion of other domain work.`
-    : `No local executor is registered for ${envelope.capability} on ${envelope.worker}; nothing was executed. Receipt ${receipt.receipt_id}.`;
+  const result = verified
+    ? `Workspace inventory completed: ${evidence.files_indexed} files indexed; ${evidence.hash_skipped_files} files not hashed. Manifest ${evidence.manifest_id}. This does not perform or complete any unrelated requested task.`
+    : `No verified local executor exists for ${envelope.capability} on ${envelope.worker}; the requested operation was not executed.`;
   return {
     status,
-    success: handled,
+    success: verified,
+    objective_completed: verified,
+    operation: verified ? expectedOperation : null,
+    evidence,
     result,
-    ...(handled ? {} : { error: result }),
+    ...(verified ? {} : { error: result }),
     receipt,
     automation: execution,
   };
@@ -205,7 +232,8 @@ export function createNexusHandler({ env = process.env, now = () => new Date(), 
       if (request.method === 'GET' && url.pathname === '/health') {
         const workers = Object.keys(WORKER_CAPABILITIES);
         sendJson(response, 200, {
-          status: 'ok', service: 'pro-code-local-nexus', version: '1.1.0', workers,
+          status: 'ok', service: 'pro-code-local-nexus', version: '1.2.0', workers,
+          supported_capabilities: automation ? Object.keys(EXECUTABLE_OPERATIONS) : [],
           runtime: { status: 'ok', workers }, automation: automation?.getStatus() ?? null,
           checkedAt: now().toISOString(),
         });
@@ -231,7 +259,12 @@ export function createNexusHandler({ env = process.env, now = () => new Date(), 
         if (status.state !== 'idle' || !nonEmpty(status.latest?.manifest_id)) {
           throw new Error(status.last_error ?? 'Workspace automation did not produce a verified manifest');
         }
-        sendJson(response, 200, { status: 'succeeded', success: true, automation: status });
+        sendJson(response, 200, {
+          status: 'succeeded', success: true, objective_completed: true,
+          operation: 'workspace_inventory',
+          evidence: { manifest_id: status.latest.manifest_id, manifest_path: status.latest.manifest_path, files_indexed: status.latest.file_count },
+          automation: status,
+        });
         return;
       }
 

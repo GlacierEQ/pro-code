@@ -1,6 +1,6 @@
 # Pro-Code · Governed Local Engineering Operator
 
-**An AI engineering operator that has to prove it's allowed, prove it did the work, and prove it in the system's native language before it reports success.** It pairs a React/TypeScript cockpit with a dependency-free Node "Nexus" runtime, fail-closed worker dispatch, idempotent receipts, automatic workspace intelligence, and native verification in Rust and Haskell.
+**A local engineering operator that distinguishes executable operations, declared roles, failed attempts and actually verified results.** It pairs a React/TypeScript cockpit with a dependency-free Node "Nexus" runtime, fail-closed worker dispatch, idempotent receipts, automatic workspace intelligence, and native verification in Rust and Haskell.
 
 [![Pro-Code native verification](https://github.com/GlacierEQ/pro-code/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/GlacierEQ/pro-code/actions/workflows/ci.yml)
 [![Nervous System Contract](https://github.com/GlacierEQ/pro-code/actions/workflows/nervous-system-contract.yml/badge.svg?branch=main)](https://github.com/GlacierEQ/pro-code/actions/workflows/nervous-system-contract.yml)
@@ -11,12 +11,12 @@ Built by [Casey Barton](https://casey-barton-glaciereq.vercel.app), forward-depl
 
 ## What this proves
 
-- **Bounded authority, enforced in code.** The Nexus runtime ([`server/nexus.mjs`](server/nexus.mjs)) validates worker ownership, case/trace/task/idempotency identity, bounded constraints, and explicit acknowledgement before it reports success. Anything else fails closed.
-- **Replay-safe by construction.** An identical replay returns the original receipt (`X-Idempotent-Replay: true`). Reusing a key with a different envelope is rejected with `409`. Both cases are tested in `server/nexus.test.mjs`.
+- **Bounded local dispatch, enforced in code.** The Nexus runtime ([`server/nexus.mjs`](server/nexus.mjs)) validates worker ownership, case/trace/task/idempotency identity, bounded constraints, and explicit acknowledgement before it reports success. Anything else fails closed.
+- **Single-process replay handling.** An identical replay returns the original receipt (`X-Idempotent-Replay: true`). Reusing a key with a different envelope is rejected with `409`. Both cases are tested in `server/nexus.test.mjs`.
 - **Polyglot native verification.** Each layer is tested in its own language on every push: TypeScript/React (Vitest), Node runtime (`node --test`), Python repository contracts (`unittest`), a Rust call-depth governor, and Haskell AST validity invariants.
 - **Security and contract gates in CI.** Four workflows run on `main`: native verification, Nervous System Contract, Helix Verify, and CodeQL.
-- **Workspace intelligence.** A bounded recursive inventory produces SHA-256 hashes, exact duplicate groups, change deltas, category summaries, and evidence-ranked candidates.
-- **Hard safety by default.** Every dispatch envelope must declare `external_actions: forbidden` or it's rejected. Ambiguous 2xx responses and transport fallbacks never count as success.
+- **One implemented worker action: `inventoryWorkspace`.** A bounded recursive inventory produces SHA-256 hashes where policy permits, exact duplicate groups, change deltas, category summaries, and evidence-ranked candidates. Unrelated declared capabilities (AI inference, legal analysis, motion generation, etc.) return `501 unsupported` rather than treating the inventory as their completed work.
+- **Truthful outcomes by default.** Every dispatch envelope must declare `external_actions: forbidden` or it is rejected. The response must identify the exact operation, matching task and case, objective completion, and evidence. Browser dispatch checks are not authorization; deploy behind a trusted auth boundary before exposing beyond a local trusted interface.
 
 ## Architecture
 
@@ -78,7 +78,7 @@ It currently provides:
 - worker/capability ownership validation;
 - matching `X-Case-Id`, `X-Trace-Id`, and `Idempotency-Key` guards;
 - bounded request bodies and explicit constraints;
-- in-memory idempotent receipts and conflicting-key rejection;
+- single-process in-memory idempotent receipts and conflicting-key rejection (not crash-safe multi-node exactly-once semantics);
 - session-context storage;
 - optional filesystem memory snapshots only when a target directory is explicitly configured;
 - static serving of the built `dist` application;
@@ -96,10 +96,10 @@ local Nexus HTTP runtime
       │
       ├── invoke a registered local automation handler when available
       │
-      └── otherwise acknowledge bounded local acceptance only
+      └── otherwise return 501 unsupported, with no false completion receipt
 ```
 
-A worker registry entry is still not an external deployed worker. When no local automation handler owns a capability, the runtime records that boundary rather than inventing remote execution.
+A worker registry entry is a declared role, not a deployed service, and is shown as `declared` by default. The runtime advertises exactly which capabilities have an executable handler in `/health.supported_capabilities`; the browser disables all others. No local handler means `501 unsupported`. Only the inventory handler currently has an end-to-end success path.
 
 ### 2. Automatic workspace operator
 
@@ -118,6 +118,8 @@ The operator can:
   - `.pro-code/runtime/workspace-manifest.json`
   - `.pro-code/runtime/workspace-report.md`
   - `.pro-code/runtime/automation-status.json`
+
+An inventory cannot claim complete coverage if a directory is unreadable, the configured maximum file count is reached with remaining files, or a hash attempt fails/changes midscan. Hashes deliberately skipped by size policy are counted separately as `hash_skipped_files`; `inventory_complete` and `hash_complete` are different properties.
 
 The candidate ranking is a retrieval aid only. It does **not** establish authenticity, admissibility, relevance, or factual truth.
 
@@ -166,6 +168,9 @@ Polyglot count is not a quality metric. Languages remain only where they have a 
 
 The current system fails or bounds behavior when:
 
+- an executable is absent for the requested capability;
+- an operation returns an unrelated artifact or an unverifiable completion claim;
+- workspace scan is incomplete due to unreadable files or directories, hash instability, or file-count exhaustion;
 - a dispatch envelope is malformed;
 - a worker or capability is unknown;
 - case/trace/idempotency headers disagree with the envelope;
@@ -315,6 +320,12 @@ docs/
   ci.yml
   helix-verify.yml
 ```
+
+## Actual capability inventory
+
+The command console exposes a single known runnable operation, `inventoryWorkspace`. The earlier fantasy buttons and decorative AI model cards were removed because they represented capability names or model names without runnable executor evidence. Declared workers remain visible as non-executable until a matching handler with tests and evidence is implemented.
+
+Live local health only establishes the Nexus HTTP process is responding. It does not establish auth for untrusted networks, production deployment, external provider connectivity, or successful domain operations. Current proof is determined by tests, exact GitHub commit checks and actual runtime receipts.
 
 ## Truth boundary
 

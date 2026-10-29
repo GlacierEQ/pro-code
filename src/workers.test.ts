@@ -1,11 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
 import { NOTION_WORKER_COUNT, WorkersManager } from './workers';
 
-function okResponse(result = 'done'): Response {
-  return new Response(JSON.stringify({ status: 'succeeded', success: true, result }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  });
+function okResponse(init?: RequestInit, result = 'done'): Response {
+  const envelope = JSON.parse(String(init?.body));
+  const evidence = {
+    manifest_id: 'sha256-test-inventory', files_indexed: 3,
+    inventory_complete: true, hash_complete: true, hash_skipped_files: 0,
+  };
+  return new Response(JSON.stringify({
+    status: 'succeeded', success: true, result,
+    objective_completed: true, operation: 'workspace_inventory', evidence,
+    receipt: {
+      task_id: envelope.task_id, case_id: envelope.case_id, capability: envelope.capability,
+      operation: 'workspace_inventory', objective_completed: true, evidence,
+    },
+  }), { status: 200, headers: { 'Content-Type': 'application/json' } });
 }
 
 describe('WorkersManager dispatch contract', () => {
@@ -25,7 +34,7 @@ describe('WorkersManager dispatch contract', () => {
   });
 
   it('sends a case-scoped idempotent envelope with fail-closed constraints', async () => {
-    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(okResponse());
+    const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => okResponse(init));
     const manager = new WorkersManager({
       fetchImpl,
       baseUrl: 'https://nexus.example/',
@@ -33,7 +42,7 @@ describe('WorkersManager dispatch contract', () => {
       idFactory: prefix => `${prefix}-generated`,
     });
 
-    const result = await manager.execute('analyzeCase', { source: 'exhibit-1' }, {
+    const result = await manager.execute('inventoryWorkspace', { source: 'exhibit-1' }, {
       caseId: 'CASE-DEMO-0001',
       taskId: 'task-123',
       traceId: 'trace-456',
@@ -45,7 +54,7 @@ describe('WorkersManager dispatch contract', () => {
 
     expect(result).toMatchObject({ status: 'succeeded', success: true, live: true, result: 'done' });
     const [url, init] = fetchImpl.mock.calls[0];
-    expect(url).toBe('https://nexus.example/api/v1/workers/case-analyzer/execute');
+    expect(url).toBe('https://nexus.example/api/v1/workers/automation-orchestrator/execute');
     expect(init?.headers).toMatchObject({
       'Idempotency-Key': 'idem-789',
       'X-Case-Id': 'CASE-DEMO-0001',
@@ -69,7 +78,7 @@ describe('WorkersManager dispatch contract', () => {
   });
 
   it('applies auth and detached-signature hooks without embedding credentials', async () => {
-    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(okResponse());
+    const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => okResponse(init));
     const authHook = vi.fn().mockResolvedValue({
       headers: { Authorization: 'Bearer transport-only' },
       auth: { scheme: 'bearer', key_id: 'key-1' },
@@ -77,7 +86,7 @@ describe('WorkersManager dispatch contract', () => {
     });
     const manager = new WorkersManager({ fetchImpl, baseUrl: '', caseId: 'CASE-1', authHook });
 
-    const result = await manager.execute('analyzeCase');
+    const result = await manager.execute('inventoryWorkspace');
     const [, init] = fetchImpl.mock.calls[0];
     const envelope = JSON.parse(String(init?.body));
 
@@ -127,6 +136,32 @@ describe('WorkersManager dispatch contract', () => {
     }
   });
 
+  it('rejects a successful HTTP response that has no objective evidence', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ status: 'succeeded', success: true, result: 'inventory complete' }), { status: 200 }),
+    );
+    const manager = new WorkersManager({ fetchImpl, baseUrl: '', caseId: 'CASE-1' });
+    const result = await manager.execute('inventoryWorkspace');
+    expect(result).toMatchObject({ success: false, status: 'failed', live: false });
+    expect(result.error?.code).toBe('invalid_response');
+  });
+
+  it('does not mark a capability deployed merely because its worker appears in health', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({
+        status: 'ok',
+        workers: ['automation-orchestrator', 'case-analyzer'],
+        supported_capabilities: ['inventoryWorkspace'],
+        runtime: { status: 'ok', workers: ['automation-orchestrator', 'case-analyzer'] },
+      }), { status: 200 }),
+    );
+    const manager = new WorkersManager({ fetchImpl, baseUrl: '', caseId: 'CASE-1' });
+    const health = await manager.syncFromRuntime();
+    expect(health.supportedCapabilities).toEqual(['inventoryWorkspace']);
+    expect(manager.findWorkerByName('case-analyzer')?.status).toBe('declared');
+    expect(manager.getStats().verified).toBe(0);
+  });
+
   it('rejects unknown capabilities without passthrough', async () => {
     const fetchImpl = vi.fn<typeof fetch>();
     const manager = new WorkersManager({ fetchImpl, baseUrl: '', caseId: 'CASE-1' });
@@ -149,7 +184,7 @@ describe('WorkersManager dispatch contract', () => {
   });
 
   it('treats a nullish auth hook result as empty security metadata', async () => {
-    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(okResponse());
+    const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async (_url, init) => okResponse(init));
     const authHook = vi.fn().mockResolvedValue(undefined);
     const manager = new WorkersManager({
       fetchImpl,
@@ -158,7 +193,7 @@ describe('WorkersManager dispatch contract', () => {
       authHook: authHook as never,
     });
 
-    const result = await manager.execute('analyzeCase');
+    const result = await manager.execute('inventoryWorkspace');
 
     expect(result).toMatchObject({ status: 'succeeded', success: true });
     const [, init] = fetchImpl.mock.calls[0];

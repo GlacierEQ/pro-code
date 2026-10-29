@@ -7,7 +7,7 @@
  * inject an auth/signature hook that can delegate signing to a trusted boundary.
  */
 
-export type WorkerStatus = 'deployed' | 'running' | 'paused' | 'error';
+export type WorkerStatus = 'declared' | 'verified' | 'running' | 'paused' | 'error';
 export type DispatchPriority = 'low' | 'normal' | 'high' | 'urgent';
 export type DispatchStatus = 'succeeded' | 'failed' | 'rejected';
 
@@ -104,6 +104,9 @@ export interface ExecuteResult {
   success: boolean;
   result?: string;
   error?: DispatchError;
+  operation?: string;
+  objectiveCompleted?: boolean;
+  evidence?: { manifest_id: string; files_indexed: number; inventory_complete: boolean; hash_complete?: boolean; hash_skipped_files?: number };
   durationMs: number;
   live: boolean;
   envelope?: DispatchEnvelope;
@@ -112,6 +115,7 @@ export interface ExecuteResult {
 export interface NexusHealth {
   status: 'ok' | 'unreachable';
   workers?: string[];
+  supportedCapabilities?: string[];
   runtimeHealth?: { status: 'ok' | 'unreachable'; workers?: string[] };
   checkedAt: string;
 }
@@ -132,6 +136,10 @@ interface RuntimeResponse {
   success?: boolean;
   result?: string;
   error?: string;
+  operation?: string | null;
+  objective_completed?: boolean;
+  evidence?: { manifest_id?: string; files_indexed?: number; inventory_complete?: boolean; hash_complete?: boolean; hash_skipped_files?: number } | null;
+  receipt?: { task_id?: string; case_id?: string; capability?: string; operation?: string | null; objective_completed?: boolean; evidence?: { manifest_id?: string; files_indexed?: number; inventory_complete?: boolean; hash_complete?: boolean; hash_skipped_files?: number } | null };
 }
 
 function readEnv(name: string): string | undefined {
@@ -166,21 +174,21 @@ function transportError(error: unknown): DispatchError {
 }
 
 export const NOTION_WORKERS: WorkerConfig[] = [
-  { id: '019eadea-0000', name: 'strategist', capabilities: ['analyzeStrategy', 'createStrategyTask', 'strategyReviewSync'], status: 'deployed', runsCount: 0 },
-  { id: '019eadeb-0000', name: 'coordinator', capabilities: ['assignTask', 'executeTask', 'taskQueueStatusSync'], status: 'deployed', runsCount: 0 },
-  { id: '019eadec-0000', name: 'analyst', capabilities: ['analyzeData', 'synthesizeData', 'dataIngestionSync'], status: 'deployed', runsCount: 0 },
-  { id: '019eadec-b4de', name: 'creator', capabilities: ['generateContent', 'generateReport', 'contentSync'], status: 'deployed', runsCount: 0 },
-  { id: '019eae18-0000', name: 'database-crawler', capabilities: ['consolidatePages', 'crawlDatabase', 'pageSync'], status: 'deployed', runsCount: 0 },
-  { id: '019eae19-0000', name: 'memory-specialist', capabilities: ['organizeMemory', 'extractMemory', 'memorySync'], status: 'deployed', runsCount: 0 },
-  { id: '019eae19-bc2e', name: 'python-executor', capabilities: ['executePython', 'connectNotionAI', 'pythonScriptSync'], status: 'deployed', runsCount: 0 },
-  { id: '019eae1a-0000', name: 'api-manager', capabilities: ['executeAPI', 'configureRateLimiter', 'apiCallSync'], status: 'deployed', runsCount: 0 },
-  { id: '019eae1a-d1ff', name: 'mcp-manager', capabilities: ['connectMCP', 'manageMCPSession', 'mcpSync'], status: 'deployed', runsCount: 0 },
-  { id: '019eae1b-0000', name: 'photo-analyzer', capabilities: ['analyzePhoto', 'processBatchPhotos', 'photoSync'], status: 'deployed', runsCount: 0 },
-  { id: '019eae1b-de64', name: 'video-processor', capabilities: ['processVideo', 'processBatchVideos', 'videoSync'], status: 'deployed', runsCount: 0 },
-  { id: '019eae1c-0000', name: 'case-analyzer', capabilities: ['analyzeCase', 'consolidateCases', 'caseSync'], status: 'deployed', runsCount: 0 },
-  { id: '019eae1c-e35f', name: 'motion-generator', capabilities: ['generateMotion', 'generateBatchMotions', 'motionSync'], status: 'deployed', runsCount: 0 },
-  { id: '019eae1d-0000', name: 'ai-executor', capabilities: ['executeLocalModel', 'handoffFromGemini', 'automationDispatch', 'modelMaximize'], status: 'deployed', runsCount: 0 },
-  { id: '019eae1d-a1b2', name: 'automation-orchestrator', capabilities: ['runApexMaximize', 'dispatchWorker', 'helixAutomation', 'notionSync'], status: 'deployed', runsCount: 0 },
+  { id: '019eadea-0000', name: 'strategist', capabilities: ['analyzeStrategy', 'createStrategyTask', 'strategyReviewSync'], status: 'declared', runsCount: 0 },
+  { id: '019eadeb-0000', name: 'coordinator', capabilities: ['assignTask', 'executeTask', 'taskQueueStatusSync'], status: 'declared', runsCount: 0 },
+  { id: '019eadec-0000', name: 'analyst', capabilities: ['analyzeData', 'synthesizeData', 'dataIngestionSync'], status: 'declared', runsCount: 0 },
+  { id: '019eadec-b4de', name: 'creator', capabilities: ['generateContent', 'generateReport', 'contentSync'], status: 'declared', runsCount: 0 },
+  { id: '019eae18-0000', name: 'database-crawler', capabilities: ['consolidatePages', 'crawlDatabase', 'pageSync'], status: 'declared', runsCount: 0 },
+  { id: '019eae19-0000', name: 'memory-specialist', capabilities: ['organizeMemory', 'extractMemory', 'memorySync'], status: 'declared', runsCount: 0 },
+  { id: '019eae19-bc2e', name: 'python-executor', capabilities: ['executePython', 'connectNotionAI', 'pythonScriptSync'], status: 'declared', runsCount: 0 },
+  { id: '019eae1a-0000', name: 'api-manager', capabilities: ['executeAPI', 'configureRateLimiter', 'apiCallSync'], status: 'declared', runsCount: 0 },
+  { id: '019eae1a-d1ff', name: 'mcp-manager', capabilities: ['connectMCP', 'manageMCPSession', 'mcpSync'], status: 'declared', runsCount: 0 },
+  { id: '019eae1b-0000', name: 'photo-analyzer', capabilities: ['analyzePhoto', 'processBatchPhotos', 'photoSync'], status: 'declared', runsCount: 0 },
+  { id: '019eae1b-de64', name: 'video-processor', capabilities: ['processVideo', 'processBatchVideos', 'videoSync'], status: 'declared', runsCount: 0 },
+  { id: '019eae1c-0000', name: 'case-analyzer', capabilities: ['analyzeCase', 'consolidateCases', 'caseSync'], status: 'declared', runsCount: 0 },
+  { id: '019eae1c-e35f', name: 'motion-generator', capabilities: ['generateMotion', 'generateBatchMotions', 'motionSync'], status: 'declared', runsCount: 0 },
+  { id: '019eae1d-0000', name: 'ai-executor', capabilities: ['executeLocalModel', 'handoffFromGemini', 'automationDispatch', 'modelMaximize'], status: 'declared', runsCount: 0 },
+  { id: '019eae1d-a1b2', name: 'automation-orchestrator', capabilities: ['runApexMaximize', 'dispatchWorker', 'helixAutomation', 'notionSync', 'inventoryWorkspace'], status: 'declared', runsCount: 0 },
 ];
 
 export const NOTION_WORKER_COUNT = NOTION_WORKERS.length;
@@ -193,11 +201,12 @@ export async function checkNexusHealth(
   try {
     const res = await fetchImpl(`${baseUrl}/health`, { signal: timeoutSignal(5_000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json() as { status?: string; runtime?: { status?: string; workers?: string[] }; workers?: string[] };
+    const data = await res.json() as { status?: string; runtime?: { status?: string; workers?: string[] }; workers?: string[]; supported_capabilities?: string[] };
     if (data.status !== 'ok') throw new Error('Nexus health response was not ok');
     return {
       status: 'ok',
       workers: data.workers,
+      supportedCapabilities: Array.isArray(data.supported_capabilities) ? data.supported_capabilities : [],
       runtimeHealth: data.runtime
         ? { status: data.runtime.status === 'ok' ? 'ok' : 'unreachable', workers: data.runtime.workers }
         : undefined,
@@ -316,8 +325,21 @@ export class WorkersManager {
       if (typeof body.result !== 'string') {
         throw { kind: 'invalid', message: 'Runtime success response omitted a string result' };
       }
+      // A successful transport cannot substitute for the requested objective.
+      if (body.objective_completed !== true || typeof body.operation !== 'string' ||
+          body.receipt?.objective_completed !== true || body.receipt.capability !== capability ||
+          body.receipt.operation !== body.operation || body.receipt.task_id !== taskId ||
+          body.receipt.case_id !== caseId) {
+        throw { kind: 'invalid', message: 'Runtime did not verify completion of the requested operation' };
+      }
+      if (capability !== 'inventoryWorkspace' || (body.operation !== 'workspace_inventory' ||
+          body.evidence?.inventory_complete !== true ||
+          typeof body.evidence.manifest_id !== 'string' || !body.evidence.manifest_id ||
+          body.receipt.evidence?.manifest_id !== body.evidence.manifest_id)) {
+        throw { kind: 'invalid', message: 'Workspace inventory receipt is missing complete, matching evidence' };
+      }
 
-      worker.status = 'deployed';
+      worker.status = 'verified';
       this.nexusLive = true;
       return {
         worker: worker.name,
@@ -325,6 +347,13 @@ export class WorkersManager {
         status: 'succeeded',
         success: true,
         result: body.result,
+        operation: body.operation,
+        objectiveCompleted: true,
+        evidence: body.evidence?.inventory_complete === true ? {
+          manifest_id: body.evidence.manifest_id!, files_indexed: body.evidence.files_indexed!,
+          inventory_complete: true, hash_complete: body.evidence.hash_complete,
+          hash_skipped_files: body.evidence.hash_skipped_files,
+        } : undefined,
         durationMs: elapsedMs(startedAt),
         live: true,
         envelope,
@@ -341,7 +370,8 @@ export class WorkersManager {
 
       worker.status = 'error';
       worker.lastError = dispatchError.message;
-      this.nexusLive = false;
+      // A negative response is not a transport outage.
+      this.nexusLive = typed.kind === 'runtime' || typed.kind === 'invalid';
       return {
         worker: worker.name,
         capability,
@@ -379,8 +409,8 @@ export class WorkersManager {
     if (health.status === 'ok' && health.runtimeHealth?.workers) {
       const liveSet = new Set(health.runtimeHealth.workers);
       this.workers.forEach(worker => {
-        if (liveSet.has(worker.name) && worker.status !== 'running' && worker.status !== 'paused') {
-          worker.status = 'deployed';
+        if (liveSet.has(worker.name) && worker.status !== 'running' && worker.status !== 'paused' && worker.status !== 'verified') {
+          worker.status = 'declared';
           worker.lastError = undefined;
         }
       });
@@ -403,7 +433,8 @@ export class WorkersManager {
     const all = this.getStatus();
     return {
       total: all.length,
-      deployed: all.filter(worker => worker.status === 'deployed').length,
+      verified: all.filter(worker => worker.status === 'verified').length,
+      declared: all.filter(worker => worker.status === 'declared').length,
       running: all.filter(worker => worker.status === 'running').length,
       paused: all.filter(worker => worker.status === 'paused').length,
       error: all.filter(worker => worker.status === 'error').length,
@@ -422,7 +453,7 @@ export class WorkersManager {
   resumeWorker(name: string): boolean {
     const worker = this.findWorkerByName(name);
     if (!worker) return false;
-    worker.status = 'deployed';
+    worker.status = 'declared';
     worker.lastError = undefined;
     return true;
   }

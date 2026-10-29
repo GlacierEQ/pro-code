@@ -21,7 +21,8 @@ function dispatchEnvelope(capability, taskId) {
       source_refs: [],
     },
     producer: { system: 'pro-code', component: 'automatic-runtime-test', version: '1.0.0' },
-    worker: capability === 'generateBatchMotions' ? 'motion-generator' : 'case-analyzer',
+    worker: capability === 'inventoryWorkspace' ? 'automation-orchestrator'
+      : capability === 'generateBatchMotions' ? 'motion-generator' : 'case-analyzer',
     capability,
     params: { source: 'runtime-test' },
     created_at: '2026-08-06T08:00:00.000Z',
@@ -73,22 +74,30 @@ test('default runtime starts Nexus and completes automatic workspace intelligenc
     assert.equal(health.automation.latest.file_count, 1);
 
     const caseResponse = await dispatch(runtime, 'analyzeCase', 'case-analysis');
-    assert.equal(caseResponse.status, 200);
+    assert.equal(caseResponse.status, 501);
     const caseResult = await caseResponse.json();
-    assert.equal(caseResult.success, true);
-    assert.equal(caseResult.receipt.automation_handled, true);
-    assert.equal(caseResult.automation.handled, true);
-    assert.match(caseResult.automation.artifacts.report, /workspace-report\.md$/);
+    assert.equal(caseResult.objective_completed, false);
+    assert.equal(caseResult.receipt.automation_handled, false);
 
     const motionResponse = await dispatch(runtime, 'generateBatchMotions', 'motion-pipeline');
-    assert.equal(motionResponse.status, 200);
+    assert.equal(motionResponse.status, 501);
     const motionResult = await motionResponse.json();
-    assert.equal(motionResult.receipt.automation_handled, true);
+    assert.equal(motionResult.receipt.objective_completed, false);
+
+    const inventoryResponse = await dispatch(runtime, 'inventoryWorkspace', 'workspace-inventory');
+    assert.equal(inventoryResponse.status, 200);
+    const inventoryResult = await inventoryResponse.json();
+    assert.equal(inventoryResult.objective_completed, true);
+    assert.equal(inventoryResult.operation, 'workspace_inventory');
+    assert.equal(inventoryResult.receipt.evidence.inventory_complete, true);
+    assert.equal(inventoryResult.receipt.evidence.files_indexed, 1);
+    assert.equal(inventoryResult.automation.handled, true);
+    assert.match(inventoryResult.automation.artifacts.report, /workspace-report\.md$/);
 
     const statusResponse = await fetch(`${runtime.url}/api/v1/automation/status`);
     assert.equal(statusResponse.status, 200);
     const current = await statusResponse.json();
-    assert.ok(current.automation.run_count >= 3);
+    assert.ok(current.automation.run_count >= 2);
   } finally {
     await runtime.close();
     await rm(workspaceRoot, { recursive: true, force: true });

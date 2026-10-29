@@ -72,7 +72,7 @@ test('registered capability without an executor cannot claim success', async () 
   assert.equal(body.receipt.status, 'unsupported');
   assert.equal(body.receipt.case_id, 'CASE-TEST-1');
   assert.equal(body.receipt.capability, 'analyzeCase');
-  assert.match(body.error, /nothing was executed/);
+  assert.match(body.error, /requested operation was not executed/);
 });
 
 test('identical idempotent replay returns the original receipt', async () => {
@@ -110,18 +110,18 @@ test('concurrent identical dispatches execute once and conflicting replays rejec
         invoked += 1;
         signalStarted();
         await held;
-        return { handled: true, summary: { manifest_id: 'sha256-concurrency-fixture' } };
+        return { handled: true, operation: 'workspace_inventory', verified: true, objective_completed: true, summary: { manifest_id: 'sha256-concurrency-fixture', inventory_complete: true, file_count: 2, hash_complete: true, hash_skipped_files: 0 }, artifacts: { manifest: '/fixture/workspace-manifest.json' } };
       },
     },
   });
   try {
-    const body = envelope({ task_id: 'task-concurrent', idempotency_key: 'idem-concurrent' });
+    const body = envelope({ worker: 'automation-orchestrator', capability: 'inventoryWorkspace', task_id: 'task-concurrent', idempotency_key: 'idem-concurrent' });
     const first = dispatch(body, runtime.url);
     await started;
     const replay = dispatch(body, runtime.url);
     const conflict = await dispatch(envelope({
-      task_id: 'task-conflicting',
-      idempotency_key: 'idem-concurrent',
+      worker: 'automation-orchestrator', capability: 'inventoryWorkspace',
+      task_id: 'task-conflicting', idempotency_key: 'idem-concurrent',
     }), runtime.url);
     assert.equal(conflict.status, 409);
     release();
@@ -146,12 +146,12 @@ test('failed execution is not cached as a successful idempotent receipt', async 
       async executeCapability() {
         invoked += 1;
         if (invoked === 1) throw new Error('fixture execution failure');
-        return { handled: true, summary: { manifest_id: 'sha256-recovery-fixture' } };
+        return { handled: true, operation: 'workspace_inventory', verified: true, objective_completed: true, summary: { manifest_id: 'sha256-recovery-fixture', inventory_complete: true, file_count: 2, hash_complete: true, hash_skipped_files: 0 }, artifacts: { manifest: '/fixture/workspace-manifest.json' } };
       },
     },
   });
   try {
-    const body = envelope({ task_id: 'task-retry', idempotency_key: 'idem-retry' });
+    const body = envelope({ worker: 'automation-orchestrator', capability: 'inventoryWorkspace', task_id: 'task-retry', idempotency_key: 'idem-retry' });
     const failure = await dispatch(body, runtime.url);
     assert.equal(failure.status, 500);
     assert.equal((await failure.json()).success, false);
@@ -198,4 +198,50 @@ test('filesystem sync is explicit when no destination is configured', async () =
   assert.equal(response.status, 501);
   const body = await response.json();
   assert.equal(body.status, 'unsupported');
+});
+
+test('attached inventory cannot impersonate legal analysis, motion generation, or AI execution', async () => {
+  let invoked = 0;
+  const runtime = await startNexusServer({
+    host: '127.0.0.1', port: 0,
+    automation: { async executeCapability() { invoked += 1; return { handled: true }; } },
+  });
+  try {
+    for (const [capability, worker] of [
+      ['analyzeCase', 'case-analyzer'], ['generateBatchMotions', 'motion-generator'],
+      ['modelMaximize', 'ai-executor'],
+    ]) {
+      const response = await dispatch(envelope({
+        worker, capability, task_id: `task-${capability}`, idempotency_key: `idem-${capability}`,
+      }), runtime.url);
+      assert.equal(response.status, 501);
+      const body = await response.json();
+      assert.equal(body.status, 'unsupported');
+      assert.equal(body.objective_completed, false);
+      assert.equal(body.receipt.evidence, null);
+    }
+    assert.equal(invoked, 0);
+  } finally {
+    await new Promise((resolve, reject) => runtime.server.close(error => error ? reject(error) : resolve()));
+  }
+});
+
+test('mismatched executor operation cannot become a success receipt', async () => {
+  const runtime = await startNexusServer({
+    host: '127.0.0.1', port: 0,
+    automation: { async executeCapability() {
+      return { handled: true, operation: 'legal_analysis', verified: true, objective_completed: true,
+        summary: { manifest_id: 'bogus', inventory_complete: true }, artifacts: { manifest: '/tmp/manifest' } };
+    } },
+  });
+  try {
+    const response = await dispatch(envelope({
+      worker: 'automation-orchestrator', capability: 'inventoryWorkspace',
+      task_id: 'task-fake', idempotency_key: 'idem-fake',
+    }), runtime.url);
+    assert.equal(response.status, 500);
+    assert.equal((await response.json()).success, false);
+  } finally {
+    await new Promise((resolve, reject) => runtime.server.close(error => error ? reject(error) : resolve()));
+  }
 });

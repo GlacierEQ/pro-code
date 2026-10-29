@@ -23,11 +23,9 @@ const EVIDENCE_TERMS = Object.freeze([
   ['police', 6], ['medical', 6], ['school', 5], ['email', 5], ['message', 5],
   ['timeline', 5], ['minutes', 5], ['judgment', 5], ['decree', 5], ['complaint', 5],
 ]);
-const ACTIVE_CAPABILITIES = new Set([
-  'analyzeCase', 'consolidateCases', 'crawlDatabase', 'pageSync', 'dataIngestionSync',
-  'generateReport', 'runApexMaximize', 'helixAutomation', 'automationDispatch',
-  'modelMaximize', 'organizeMemory', 'extractMemory', 'memorySync', 'generateBatchMotions',
-]);
+// Capability names must describe what the executable handler actually does.
+// An inventory is NOT legal analysis, motion generation, AI inference, or API execution.
+const ACTIVE_CAPABILITIES = new Set(['inventoryWorkspace']);
 
 function positiveInteger(value, fallback, min = 1, max = Number.MAX_SAFE_INTEGER) {
   const parsed = Number(value);
@@ -219,6 +217,9 @@ export class WorkspaceAutomation {
     }
     return {
       handled: true,
+      operation: 'workspace_inventory',
+      verified: true,
+      objective_completed: true,
       summary: status.latest,
       artifacts: { manifest: this.manifestPath, report: this.reportPath, status: this.statusPath },
       parameters_received: Object.keys(params).length,
@@ -232,6 +233,10 @@ export class WorkspaceAutomation {
     try {
       const previous = await readJson(this.manifestPath);
       const files = await this.scanFiles();
+      const incompleteHashes = files.filter(file => ['failed', 'unstable'].includes(file.hash_status));
+      if (incompleteHashes.length) {
+        throw new Error(`Workspace scan incomplete: ${incompleteHashes.length} files could not be hashed reliably`);
+      }
       const byCategory = {};
       let totalBytes = 0;
       let hashedFiles = 0;
@@ -257,7 +262,8 @@ export class WorkspaceAutomation {
         workspace_root: this.workspaceRoot, output_dir: this.outputDir,
         summary: {
           file_count: files.length, total_bytes: totalBytes, hashed_files: hashedFiles,
-          hash_skipped_files: files.length - hashedFiles, duplicate_groups: exactDuplicates.length,
+          hash_skipped_files: files.length - hashedFiles, hash_complete: hashedFiles === files.length,
+          inventory_complete: true, duplicate_groups: exactDuplicates.length,
           high_value_candidates: candidates.length, by_category: byCategory,
         },
         changes, high_value_candidates: candidates, duplicates: exactDuplicates, files,
@@ -278,6 +284,9 @@ export class WorkspaceAutomation {
         latest: {
           manifest_id: manifestId,
           file_count: files.length,
+          inventory_complete: true,
+          hash_complete: hashedFiles === files.length,
+          hash_skipped_files: files.length - hashedFiles,
           total_bytes: totalBytes,
           duplicate_groups: exactDuplicates.length,
           high_value_candidates: candidates.length,
@@ -306,12 +315,11 @@ export class WorkspaceAutomation {
       let entries;
       try {
         entries = await readdir(directory, { withFileTypes: true });
-      } catch {
-        continue;
+      } catch (error) {
+        throw new Error(`Workspace scan incomplete: could not read ${directory}: ${error instanceof Error ? error.message : String(error)}`);
       }
       entries.sort((a, b) => a.name.localeCompare(b.name));
       for (const entry of entries) {
-        if (files.length >= this.maxFiles) return files.sort((a, b) => a.path.localeCompare(b.path));
         if (EXCLUDED.has(entry.name)) continue;
         const absolutePath = path.join(directory, entry.name);
         if (absolutePath === this.outputDir || absolutePath.startsWith(`${this.outputDir}${path.sep}`)) continue;
@@ -321,11 +329,14 @@ export class WorkspaceAutomation {
           continue;
         }
         if (!entry.isFile()) continue;
+        if (files.length >= this.maxFiles) {
+          throw new Error(`Workspace scan incomplete: exceeded PRO_CODE_MAX_FILES (${this.maxFiles}); raise the limit to inventory the full workspace`);
+        }
         let metadata;
         try {
           metadata = await stat(absolutePath);
-        } catch {
-          continue;
+        } catch (error) {
+          throw new Error(`Workspace scan incomplete: could not stat ${absolutePath}: ${error instanceof Error ? error.message : String(error)}`);
         }
         const relativePath = path.relative(this.workspaceRoot, absolutePath).split(path.sep).join('/');
         const category = classify(relativePath);
