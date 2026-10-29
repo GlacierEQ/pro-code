@@ -17,7 +17,7 @@
     "test:runtime": "node --test server/nexus.test.mjs server/automation.test.mjs server/automatic-runtime.test.mjs server/innovation.test.mjs",
     "workers": "ls -la $HOME/.kiro/workers",
     "code:inspect": "node scripts/code-intelligence.mjs",
-    "test:code-intelligence": "node --test scripts/code-intelligence.test.mjs && node scripts/code-intelligence.mjs --impact src/workers.ts --out .pro-code/code-impact.json --fail-on-diagnostics"
+    "test:code-intelligence": "node --test scripts/code-intelligence.test.mjs && node scripts/code-intelligence.mjs --impact src/workers.ts --out .pro-code/runtime/code-impact.json --fail-on-diagnostics"
   },
   "dependencies": {
     "react": "^19.2.6",

@@ -53,7 +53,7 @@ The repository includes a real compiler-backed analysis command, rather than a p
 
 ```bash
 npm ci
-npm run code:inspect -- --impact src/workers.ts --out .pro-code/impact.json
+npm run code:inspect -- --impact src/workers.ts --out .pro-code/runtime/impact.json
 npm run test:code-intelligence
 ```
 
