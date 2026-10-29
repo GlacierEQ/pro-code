@@ -1,0 +1,171 @@
+name: Container build, live smoke test and release
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - ".github/workflows/container-release.yml"
+      - "server/**"
+      - "src/**"
+      - "scripts/**"
+      - "tests/**"
+      - "package*.json"
+      - "index.html"
+      - "tsconfig*.json"
+      - "vite.config.*"
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - ".github/workflows/container-release.yml"
+      - "server/**"
+      - "src/**"
+      - "scripts/**"
+      - "tests/**"
+      - "package*.json"
+      - "index.html"
+      - "tsconfig*.json"
+      - "vite.config.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  container:
+    name: Build, smoke-test, publish exact image
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out exact revision
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js for the smoke-test client
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build application and image (includes lint, types, tests)
+        run: docker build --pull --tag pro-code:verified .
+
+      - name: Start locked-down container on loopback only
+        run: |
+          docker run --detach --name pro-code-smoke \
+            --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --tmpfs /workspace:rw,nosuid,nodev,uid=1000,gid=1000 \
+            --tmpfs /data:rw,nosuid,nodev,uid=1000,gid=1000 \
+            --publish 127.0.0.1:18787:8787 \
+            pro-code:verified
+
+      - name: Verify real HTTP behavior, UI and fail-closed dispatch
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { setTimeout as sleep } from 'node:timers/promises';
+
+          const base = 'http://127.0.0.1:18787';
+          let health;
+          for (let attempt = 0; attempt < 40; attempt++) {
+            try {
+              const response = await fetch(base + '/health');
+              if (response.ok) {
+                health = await response.json();
+                break;
+              }
+            } catch {}
+            await sleep(500);
+          }
+          assert.ok(health, 'Container did not become healthy over HTTP');
+          assert.equal(health.status, 'ok');
+          assert.ok(Array.isArray(health.workers));
+          assert.ok(health.workers.length > 0);
+
+          const page = await fetch(base + '/');
+          assert.equal(page.status, 200, 'Built cockpit must be served');
+          assert.match(await page.text(), /<html/i);
+
+          const envelope = {
+            schema_version: '1.0.0',
+            case_id: 'CASE-DEPLOY-SMOKE',
+            trace_id: 'trace-container-smoke',
+            task_id: 'task-container-smoke',
+            idempotency_key: 'idem-container-smoke',
+            priority: 'normal',
+            constraints: {
+              human_review_required: true,
+              external_actions: 'forbidden',
+              max_runtime_ms: 30000,
+              allowed_tools: [],
+              source_refs: []
+            },
+            producer: { system: 'pro-code', component: 'container-smoke', version: '1.0.0' },
+            worker: 'case-analyzer',
+            capability: 'analyzeCase',
+            params: { source: 'container-smoke' },
+            created_at: new Date().toISOString()
+          };
+          const unsupported = await fetch(base + '/api/v1/workers/case-analyzer/execute', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Case-Id': envelope.case_id,
+              'X-Trace-Id': envelope.trace_id,
+              'Idempotency-Key': envelope.idempotency_key
+            },
+            body: JSON.stringify(envelope)
+          });
+          assert.equal(unsupported.status, 501, 'Unimplemented capability must not claim success');
+          const result = await unsupported.json();
+          assert.equal(result.objective_completed, false);
+          assert.equal(result.receipt.objective_completed, false);
+
+          console.log('PASS: container health, cockpit, and honest unsupported dispatch');
+          NODE
+
+      - name: Show failure diagnostics
+        if: failure()
+        run: docker logs pro-code-smoke || true
+
+      - name: Remove smoke-test container
+        if: always()
+        run: docker rm --force pro-code-smoke || true
+
+      - name: Authenticate for GitHub Container Registry only on main
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Publish the exact smoke-tested image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          immutable="$image:sha-$GITHUB_SHA"
+          docker tag pro-code:verified "$immutable"
+          docker push "$immutable"
+          digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$immutable")"
+          test -n "$digest"
+          docker tag pro-code:verified "$image:main"
+          docker push "$image:main"
+          {
+            echo "### Verified image published"
+            echo "- Source commit: \`$GITHUB_SHA\`"
+            echo "- Immutable tag: \`$immutable\`"
+            echo "- Registry digest: \`$digest\`"
+            echo "- Mutable convenience tag: \`$image:main\`"
+            echo "- Verification: image build, Node tests, live HTTP and fail-closed dispatch"
+            echo "- This is an OCI image release, not a claim of remote service deployment."
+          } >> "$GITHUB_STEP_SUMMARY"
