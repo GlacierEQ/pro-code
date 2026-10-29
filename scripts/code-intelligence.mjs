@@ -38,9 +38,20 @@ function sourceImports(sourceFile) {
     } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
       const expr = node.moduleReference.expression;
       if (expr && ts.isStringLiteralLike(expr)) push(expr.text, 'import-equals', sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1);
-    } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
-      const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
-      push(node.arguments.length >= 1 && ts.isStringLiteralLike(node.arguments[0]) ? node.arguments[0].text : null, 'dynamic-import', line);
+    } else if (ts.isCallExpression(node)) {
+      const expression = node.expression;
+      const isImport = expression.kind === ts.SyntaxKind.ImportKeyword;
+      const isRequire = ts.isIdentifier(expression) && expression.text === 'require';
+      const isRequireResolve = ts.isPropertyAccessExpression(expression)
+        && ts.isIdentifier(expression.expression)
+        && expression.expression.text === 'require'
+        && expression.name.text === 'resolve';
+      if (isImport || isRequire || isRequireResolve) {
+        const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
+        const firstArgument = node.arguments[0];
+        const specifier = firstArgument && ts.isStringLiteralLike(firstArgument) ? firstArgument.text : null;
+        push(specifier, isImport ? 'dynamic-import' : isRequireResolve ? 'require-resolve' : 'require', line);
+      }
     }
     ts.forEachChild(node, visit);
   }
@@ -91,27 +102,31 @@ export async function analyzeCodebase({ root = process.cwd(), config = 'tsconfig
     affected = [...visited].sort();
   }
   const allImports = files.flatMap(file => file.imports.map(imp => ({ importer: file.path, ...imp })));
+  const unresolvedCount = allImports.filter(imp => imp.status === 'unresolved').length;
+  const dynamicUnknownCount = allImports.filter(imp => imp.status === 'dynamic-unknown').length;
   return {
     schema_version: '1.0.0', operation: 'typescript_program_analysis',
-    scope: { workspace: workspaceRoot, tsconfig: normalize(path.relative(workspaceRoot, configuration)), compiler_version: ts.version, source_file_count: files.length, imports_checked: allImports.length, analysis_complete: true },
+    scope: { workspace: workspaceRoot, tsconfig: normalize(path.relative(workspaceRoot, configuration)), compiler_version: ts.version, source_file_count: files.length, imports_checked: allImports.length, analysis_complete: unresolvedCount === 0 && dynamicUnknownCount === 0 },
     limitations: [
       'Dependency graph includes source files in the TypeScript program only, not every file in the repository.',
-      'Non-literal dynamic imports cannot be resolved statically; their presence is reported explicitly.',
+      'Non-literal import() and CommonJS require()/require.resolve() paths cannot be resolved statically; their presence is reported explicitly.',
+      'CommonJS require-call detection is syntax-based and does not establish whether a locally shadowed require is the Node.js loader.',
       'Static diagnostics and dependency analysis are not proof of production behavior or safe deployment.',
     ],
-    findings: { diagnostic_count: diagnostics.length, unresolved_import_count: allImports.filter(x => x.status === 'unresolved').length, dynamic_unknown_count: allImports.filter(x => x.status === 'dynamic-unknown').length },
+    findings: { diagnostic_count: diagnostics.length, unresolved_import_count: unresolvedCount, dynamic_unknown_count: dynamicUnknownCount },
     diagnostics, files, impact: requested === null ? null : { target: requested, affected_files: affected },
   };
 }
 
 function parseCli(args) {
-  const options = { root: process.cwd(), config: 'tsconfig.json', impact: null, out: null, failOnDiagnostics: false };
+  const options = { root: process.cwd(), config: 'tsconfig.json', impact: null, out: null, failOnDiagnostics: false, failOnIncomplete: false };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--root' || arg === '--config' || arg === '--impact' || arg === '--out') {
       if (!args[i + 1] || args[i + 1].startsWith('--')) throw new Error(`${arg} requires a value`);
       options[arg.slice(2)] = args[++i];
     } else if (arg === '--fail-on-diagnostics') options.failOnDiagnostics = true;
+    else if (arg === '--fail-on-incomplete') options.failOnIncomplete = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
   return options;
@@ -130,7 +145,8 @@ if (invokedFile) {
       await writeFile(destination, json);
     }
     process.stdout.write(json);
-    if (options.failOnDiagnostics && result.findings.diagnostic_count > 0) process.exitCode = 1;
+    if ((options.failOnDiagnostics && result.findings.diagnostic_count > 0)
+      || (options.failOnIncomplete && !result.scope.analysis_complete)) process.exitCode = 1;
   } catch (error) {
     process.stderr.write(`code-intelligence: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;
