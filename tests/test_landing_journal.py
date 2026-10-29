@@ -127,6 +127,18 @@ class LandingJournalTest(unittest.TestCase):
         with self.assertRaisesRegex(LandingStateError, "unexpected intent fields"):
             self.j.plan("landing-1", "unsafe", {**INTENT, "token": "must-not-store"})
 
+    def test_reject_nonhex_expected_head(self):
+        with self.assertRaisesRegex(LandingStateError, "hex"):
+            self.j.plan("landing-1", "bad-sha", {**INTENT, "expected_head_sha": "z" * 40})
+
+    def test_status_reader_does_not_block_new_writer(self):
+        self.j.plan("landing-2", "merge", INTENT)
+        with self.j._read() as reader:
+            self.assertEqual(reader.execute("SELECT COUNT(*) FROM steps").fetchone()[0], 2)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                result = pool.submit(self.j.arm, "landing-2", "merge").result(timeout=3)
+            self.assertEqual(result["state"], "ARMED")
+
     def test_cannot_reuse_native_invocation_for_another_write(self):
         self.j.arm("landing-1", "merge")
         self.j.attempt("landing-1", "merge", "provider-request-1")
