@@ -225,7 +225,7 @@ async function serveStatic(requestPath, response, staticRoot = DIST) {
   try { root = await realpath(staticRoot); } catch { return false; }
   let relative;
   try {
-    relative = requestPath === '/' ? 'index.html' : decodeURIComponent(requestPath.replace(/^\\/+/, ''));
+    relative = requestPath === '/' ? 'index.html' : decodeURIComponent(requestPath.replace(/^[/]+/, ''));
   } catch { return false; }
   const requested = path.resolve(root, relative);
   if (!insideDirectory(root, requested)) return false;
