@@ -47,6 +47,37 @@ A corresponding independently fetched native snapshot can be:
 
 Run `python -m unittest tests.test_landing_journal -v` and, for CLI help, `python -m tools.github_ops.landing_journal --help`. The portable module must be integrated into the original launcher **after reading its current source and verifying its existing CLI and approval behavior**. The original runner was not accessible in the 2026-10-29 session; **no claim of in-place integration** is made.
 
+## Native GitHub readback integrated (GET-only)
+
+The journal now includes `reconcile_native(plan, step)` and CLI action `native-reconcile`.
+It reads the live GitHub PR **without initiating or retrying any write**, and
+requires the exact expected PR head SHA, matching target repository and
+`main` branch, proper merged/closed state, an actual merge commit, and
+merge-commit ancestry on the current `main`. Unknown, timed-out,
+inaccessible, altered-head or nonancestral results keep the original
+journal state with `NATIVE_READBACK_UNAVAILABLE`. A declined step
+is terminal and makes **zero provider requests**.
+
+```sh
+python3 -m tools.github_ops.landing_journal --db PATH native-reconcile \
+  --plan YOUR_PLAN --step YOUR_STEP
+python3 -m unittest tests.test_native_readback -v
+```
+
+This public-repository verifier uses GitHub REST **GET** only, no alternate
+write authentication or consent bypass. Private/inaccessible repositories
+need authenticated readback through the existing authorized connector or
+a provider-native read path, not a fabricated success. The existing
+`reconcile` API remains available for caller-supplied provider snapshots;
+prefer `native-reconcile` for independently verified public PR state.
+
+Observed against actual GitHub PR `GlacierEQ/pro-code#30` on 2026-10-29:
+a new unattempted plan returned `ALREADY_SATISFIED` with matching server-side
+merge and ancestry, not `VERIFIED` as if this tool had performed the write.
+Nine additional negative and crash-lifecycle tests passed on an authorized
+test environment. This is the repository's recovery functionality; no claim
+is made that the separate detached local `ghl.py` runner was modified.
+
 ## Estate-specific do-not-touch targets
 
 The operator's refusal to close `GlacierEQ/spacex-mission-control#3` is binding; `GlacierEQ/spacex-telemetry#5` and `#6` also remain open without further explicit direction. Do not load these as automatic cleanup work or create a plan to close them.

@@ -48,8 +48,27 @@ function digest(value) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
-function commonHeaders(response) {
-  response.setHeader('Access-Control-Allow-Origin', '*');
+const LOOPBACK_HOST = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::[0-9]{1,5})?$/i;
+
+// An arbitrary website must not gain read/write access to a local operator
+// merely because the service is bound to loopback. Custom remote origins
+// require an explicit, exact allowlist and a separate authentication boundary.
+function allowedBrowserOrigin(request, env) {
+  const origin = request.headers.origin;
+  if (origin === undefined) return null;
+  if (typeof origin !== 'string') return false;
+  let parsed;
+  try { parsed = new URL(origin); } catch { return false; }
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.origin !== origin) return false;
+  const ownHost = request.headers.host ?? '';
+  if (LOOPBACK_HOST.test(ownHost) && LOOPBACK_HOST.test(parsed.host)) return origin;
+  const allowlist = String(env.PRO_CODE_ALLOWED_ORIGINS ?? '').split(',').map(value => value.trim()).filter(Boolean);
+  return allowlist.includes(origin) ? origin : false;
+}
+
+function commonHeaders(response, origin = null) {
+  response.setHeader('Vary', 'Origin');
+  if (origin) response.setHeader('Access-Control-Allow-Origin', origin);
   response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Idempotency-Key, X-Case-Id, X-Trace-Id');
   response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   response.setHeader('Cache-Control', 'no-store');
@@ -259,7 +278,16 @@ export function createNexusHandler({ env = process.env, now = () => new Date(), 
   const contexts = new Map();
 
   return async function nexusHandler(request, response) {
-    commonHeaders(response);
+    const origin = allowedBrowserOrigin(request, env);
+    const untrusted = origin === false
+      || (origin === null && request.headers['sec-fetch-site'] === 'cross-site');
+    commonHeaders(response, untrusted ? null : origin);
+    if (untrusted) {
+      sendJson(response, 403, {
+        status: 'rejected', success: false, error: 'Browser origin is not authorized for local Nexus',
+      });
+      return;
+    }
     if (request.method === 'OPTIONS') {
       response.statusCode = 204;
       response.end();

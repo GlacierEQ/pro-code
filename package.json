@@ -13,7 +13,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "test": "npm run test:runtime && npm run test:code-intelligence && npm run test:code-completion && npm run test:code-knowledge && vitest run --exclude server/nexus.test.mjs --exclude server/automation.test.mjs --exclude server/automatic-runtime.test.mjs --exclude server/innovation.test.mjs --exclude scripts/code-intelligence.test.mjs --exclude scripts/code-completion.test.mjs --exclude scripts/code-knowledge.test.mjs",
+    "test": "npm run test:runtime && npm run test:code-intelligence && npm run test:code-completion && npm run test:code-knowledge && npm run test:code-refactor && vitest run --exclude server/nexus.test.mjs --exclude server/automation.test.mjs --exclude server/automatic-runtime.test.mjs --exclude server/innovation.test.mjs --exclude scripts/code-intelligence.test.mjs --exclude scripts/code-completion.test.mjs --exclude scripts/code-knowledge.test.mjs --exclude scripts/code-refactor.test.mjs",
     "test:runtime": "node --test server/nexus.test.mjs server/automation.test.mjs server/automatic-runtime.test.mjs server/innovation.test.mjs",
     "workers": "ls -la $HOME/.kiro/workers",
     "code:inspect": "node scripts/code-intelligence.mjs",
@@ -21,7 +21,9 @@
     "code:complete": "node scripts/code-completion.mjs",
     "test:code-completion": "node --test scripts/code-completion.test.mjs",
     "code:knowledge": "node scripts/code-knowledge.mjs",
-    "test:code-knowledge": "node --test scripts/code-knowledge.test.mjs && node scripts/code-knowledge.mjs --symbol workersManager --definition-file src/workers.ts --out .pro-code/runtime/code-knowledge.json --fail-on-diagnostics"
+    "test:code-knowledge": "node --test scripts/code-knowledge.test.mjs && node scripts/code-knowledge.mjs --symbol workersManager --definition-file src/workers.ts --out .pro-code/runtime/code-knowledge.json --fail-on-diagnostics",
+    "code:refactor": "node scripts/code-refactor.mjs",
+    "test:code-refactor": "node --test scripts/code-refactor.test.mjs"
   },
   "dependencies": {
     "react": "^19.2.6",

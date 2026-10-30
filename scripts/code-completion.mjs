@@ -11,7 +11,8 @@ const unix = value => value.split(path.sep).join('/');
 
 function workspaceRelative(root, filename) {
   const absolute = path.resolve(filename);
-  return within(root, absolute) ? unix(path.relative(root, absolute)) : null;
+  if (!within(root, absolute) || (fs.existsSync(absolute) && !within(root, fs.realpathSync(absolute)))) return null;
+  return unix(path.relative(root, absolute));
 }
 
 function completionActions(root, detail) {
@@ -43,7 +44,7 @@ function localFile(root, requested, label) {
 /** Read-only compiler-backed completions in a real configured TS/JS project. */
 export function completeCode({
   root = process.cwd(), config = 'tsconfig.json', file, line, column,
-  limit = 40, prefix = '', content, autoPrefix = false, includeDetails = false,
+  limit = 40, prefix = '', content, autoPrefix = false, includeDetails = false, includeDiagnostics = false,
 } = {}) {
   const workspace = fs.realpathSync(path.resolve(root));
   const configuration = localFile(workspace, config, 'tsconfig');
@@ -53,8 +54,8 @@ export function completeCode({
   }
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('limit must be an integer from 1 to 100');
   if (typeof prefix !== 'string' || prefix.length > 128) throw new Error('prefix must be at most 128 characters');
-  if (typeof autoPrefix !== 'boolean' || typeof includeDetails !== 'boolean') {
-    throw new Error('autoPrefix and includeDetails must be booleans');
+  if (typeof autoPrefix !== 'boolean' || typeof includeDetails !== 'boolean' || typeof includeDiagnostics !== 'boolean') {
+    throw new Error('autoPrefix, includeDetails and includeDiagnostics must be booleans');
   }
   if (content !== undefined && (typeof content !== 'string' || Buffer.byteLength(content, 'utf8') > 2_097_152)) {
     throw new Error('content must be a UTF-8 string of at most 2 MiB');
@@ -131,6 +132,19 @@ export function completeCode({
         } : {}),
       };
     });
+    const diagnostics = includeDiagnostics
+      ? [...service.getSyntacticDiagnostics(target), ...service.getSemanticDiagnostics(target)].map(d => {
+        const where = d.file && Number.isInteger(d.start) ? d.file.getLineAndCharacterOfPosition(d.start) : null;
+        return {
+          code: d.code,
+          category: ts.DiagnosticCategory[d.category].toLowerCase(),
+          message: ts.flattenDiagnosticMessageText(d.messageText, '\n'),
+          line: where ? where.line + 1 : null,
+          column: where ? where.character + 1 : null,
+        };
+      }).sort((left, right) => (left.line ?? 0) - (right.line ?? 0)
+        || (left.column ?? 0) - (right.column ?? 0) || left.code - right.code)
+      : null;
     return {
       schema_version: '1.0.0',
       operation: 'typescript_language_service_completion',
@@ -145,6 +159,7 @@ export function completeCode({
       returned: entries.length,
       is_incomplete: result?.isIncomplete ?? false,
       entries,
+      ...(includeDiagnostics ? { diagnostics } : {}),
       limitations: [
         'Suggestions and suggested code actions are read-only; no source files are modified.',
         'Editor-buffer completions use a transient unsaved snapshot of the target file; other project files are read from disk.',
@@ -165,6 +180,7 @@ function parseCli(args) {
     const flag = args[i];
     if (flag === '--auto-prefix') { values.autoPrefix = true; continue; }
     if (flag === '--details') { values.includeDetails = true; continue; }
+    if (flag === '--diagnostics') { values.includeDiagnostics = true; continue; }
     if (flag === '--content-stdin') { values.content = fs.readFileSync(0, 'utf8'); continue; }
     const name = flag.startsWith('--') ? flag.slice(2) : '';
     if (!supported.has(name)) throw new Error(`Unknown argument: ${flag}`);
