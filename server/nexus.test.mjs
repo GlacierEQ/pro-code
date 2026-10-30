@@ -387,3 +387,58 @@ test('bounded idempotency keeps hot receipts and expires cold completed keys', a
     await new Promise((resolve, reject) => runtime.server.close(error => error ? reject(error) : resolve()));
   }
 });
+
+
+test('active execution remains single-flight while completed cache is saturated', async () => {
+  let invoked = 0;
+  let release;
+  let started;
+  const held = new Promise(resolve => { release = resolve; });
+  const underway = new Promise(resolve => { started = resolve; });
+  const runtime = await startNexusServer({
+    host: '127.0.0.1', port: 0,
+    automation: {
+      async executeCapability(_capability, params) {
+        invoked++;
+        if (params.tag === 'held') {
+          started();
+          await held;
+        }
+        return {
+          handled: true, operation: 'workspace_inventory', verified: true,
+          objective_completed: true,
+          summary: { manifest_id: 'sha256-pressure-fixture', inventory_complete: true,
+            file_count: 1, hash_complete: true, hash_skipped_files: 0 },
+          artifacts: { manifest: '/fixture/workspace-manifest.json' },
+        };
+      },
+    },
+  });
+  const makeBody = tag => envelope({
+    worker: 'automation-orchestrator',
+    capability: 'inventoryWorkspace',
+    constraints: { ...envelope().constraints, human_review_required: false },
+    case_id: 'workspace:local', task_id: `pressure-task-${tag}`,
+    idempotency_key: `pressure-key-${tag}`, params: { tag },
+  });
+  try {
+    const original = dispatch(makeBody('held'), runtime.url);
+    await underway;
+    for (let i = 0; i < 510; i++) {
+      const response = await dispatch(makeBody(String(i)), runtime.url);
+      assert.equal(response.status, 200);
+    }
+    assert.equal(invoked, 511);
+    const duplicate = dispatch(makeBody('held'), runtime.url);
+    release();
+    const [first, second] = await Promise.all([original, duplicate]);
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    assert.equal(second.headers.get('x-idempotent-replay'), 'true');
+    assert.deepEqual(await first.json(), await second.json());
+    assert.equal(invoked, 511, 'cache pressure must not duplicate active work');
+  } finally {
+    release();
+    await new Promise((resolve, reject) => runtime.server.close(error => error ? reject(error) : resolve()));
+  }
+});
