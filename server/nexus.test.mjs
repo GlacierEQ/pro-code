@@ -277,3 +277,56 @@ test('risk boundaries remain enforced for local scope and read-only capability',
   });
   assert.equal((await dispatch(external)).status, 422);
 });
+
+
+test('foreign browser origins cannot read Nexus health or mutate local contexts', async () => {
+  const foreign = 'https://untrusted.example';
+  const read = await fetch(`${baseUrl}/health`, { headers: { Origin: foreign } });
+  assert.equal(read.status, 403);
+  assert.equal(read.headers.get('access-control-allow-origin'), null);
+  assert.equal(read.headers.get('vary'), 'Origin');
+  const write = await fetch(`${baseUrl}/context/browser-isolation-test`, {
+    method: 'POST',
+    headers: { Origin: foreign, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data: { injected: true } }),
+  });
+  assert.equal(write.status, 403);
+  const readback = await fetch(`${baseUrl}/context/browser-isolation-test`);
+  assert.deepEqual((await readback.json()).data, {});
+});
+
+test('trusted local development origins can preflight without granting wildcard CORS', async () => {
+  const devOrigin = 'http://localhost:5173';
+  const preflight = await fetch(`${baseUrl}/api/v1/workers/strategist/execute`, {
+    method: 'OPTIONS',
+    headers: {
+      Origin: devOrigin,
+      'Access-Control-Request-Method': 'POST',
+      'Access-Control-Request-Headers': 'Content-Type, Idempotency-Key',
+    },
+  });
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get('access-control-allow-origin'), devOrigin);
+  const local = await fetch(`${baseUrl}/health`, { headers: { Origin: devOrigin } });
+  assert.equal(local.status, 200);
+  assert.equal(local.headers.get('access-control-allow-origin'), devOrigin);
+  assert.equal((await fetch(`${baseUrl}/health`, { headers: { Origin: 'null' } })).status, 403);
+  assert.equal((await fetch(`${baseUrl}/health`, { headers: { 'Sec-Fetch-Site': 'cross-site' } })).status, 403);
+});
+
+test('remote browser origins require explicit exact allowlisting', async () => {
+  const configured = await startNexusServer({
+    host: '127.0.0.1', port: 0,
+    env: { PRO_CODE_ALLOWED_ORIGINS: 'https://trusted.example, https://second.example' },
+  });
+  try {
+    const permitted = await fetch(`${configured.url}/health`, { headers: { Origin: 'https://trusted.example' } });
+    assert.equal(permitted.status, 200);
+    assert.equal(permitted.headers.get('access-control-allow-origin'), 'https://trusted.example');
+    const rejected = await fetch(`${configured.url}/health`, { headers: { Origin: 'https://trusted.example.attacker.test' } });
+    assert.equal(rejected.status, 403);
+    assert.equal(rejected.headers.get('access-control-allow-origin'), null);
+  } finally {
+    await new Promise((resolve, reject) => configured.server.close(error => error ? reject(error) : resolve()));
+  }
+});
