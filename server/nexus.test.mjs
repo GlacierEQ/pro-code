@@ -304,7 +304,7 @@ test('static serving reads canonical in-root files and SPA fallback without disc
     const fallback = await fetch(runtime.url + '/deep/link');
     assert.equal(fallback.status, 200);
     assert.equal(await fallback.text(), '<h1>safe index</h1>');
-    for (const filename of ['/leak.txt', '/private/secret.txt', '/%2e%2e/outside/secret.txt']) {
+    for (const filename of ['/leak.txt', '/private/secret.txt', '/%2f..%2foutside%2fsecret.txt']) {
       const denied = await fetch(runtime.url + filename);
       assert.equal(denied.status, 404, filename);
       assert.doesNotMatch(await denied.text(), /SECRET-DO-NOT-SERVE|safe index/, filename);
