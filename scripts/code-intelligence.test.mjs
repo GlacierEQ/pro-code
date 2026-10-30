@@ -243,8 +243,8 @@ test('local require helpers do not create false module edges', async () => {
 
 test('one compiler program snapshot is exposed to downstream analysis consumers', async () => {
   const root = await fixture({
-    'source.ts': 'export const value: number = 7;\\n',
-    'reader.ts': "import { value } from './source'; export const answer = value + 1;\\n",
+    'source.ts': 'export const value: number = 7;\n',
+    'reader.ts': "import { value } from './source'; export const answer = value + 1;\n",
   });
   try {
     const programs = [];
@@ -261,7 +261,7 @@ test('one compiler program snapshot is exposed to downstream analysis consumers'
 });
 
 test('invalid compiler callback is rejected without silently ignoring it', async () => {
-  const root = await fixture({ 'one.ts': 'export const value = 1;\\n' });
+  const root = await fixture({ 'one.ts': 'export const value = 1;\n' });
   try {
     await assert.rejects(() => analyzeCodebase({ root, onProgram: true }), /onProgram must be a function/);
   } finally { await rm(root, { recursive: true, force: true }); }
