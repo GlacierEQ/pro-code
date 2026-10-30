@@ -150,7 +150,18 @@ class LandingSequence:
                 for row in db.execute("SELECT * FROM steps WHERE plan_id=?", (plan_id,))
             }
         steps = []
-        counts = {"ready": 0, "reconcile": 0, "blocked": 0, "completed": 0, "declined": 0}
+        counts = {"ready": 0, "reconcile": 0, "blocked": 0,
+                  "blocked_declined": 0, "completed": 0, "declined": 0}
+        config = {step["id"]: step for step in manifest["steps"]}
+
+        def declined_dependencies(step_id):
+            """Find stopped prerequisite chains, including transitive declines."""
+            affected = []
+            for dependency in config[step_id]["depends_on"]:
+                if rows[dependency]["state"] == "DECLINED" or declined_dependencies(dependency):
+                    affected.append(dependency)
+            return affected
+
         for step in manifest["steps"]:
             step_id, deps = step["id"], step["depends_on"]
             row = rows.get(step_id)
@@ -158,12 +169,15 @@ class LandingSequence:
                 raise LandingStateError(f"journal corruption: missing {step_id}")
             state = row["state"]
             pending = [dep for dep in deps if rows[dep]["state"] not in CONFIRMED]
+            denied_dependencies = declined_dependencies(step_id) if state == "PLANNED" else []
             if state in CONFIRMED:
                 action, group = "COMPLETE", "completed"
             elif state == "DECLINED":
                 action, group = "DECLINED_STOP", "declined"
             elif state in UNCERTAIN:
                 action, group = "RECONCILE_REMOTE_FIRST", "reconcile"
+            elif state == "PLANNED" and denied_dependencies:
+                action, group = "STOPPED_BY_DECLINE", "blocked_declined"
             elif state == "PLANNED" and not pending:
                 action, group = "READY_TO_ARM", "ready"
             elif state == "PLANNED":
@@ -174,14 +188,20 @@ class LandingSequence:
             steps.append({
                 "step_id": step_id, "state": state, "action": action,
                 "depends_on": deps, "pending_dependencies": pending,
+                "declined_dependencies": denied_dependencies,
                 "repository": step["intent"]["repository"],
                 "target": step["intent"]["target"],
                 "operation": step["intent"]["operation"],
                 "expected_head_sha": step["intent"].get("expected_head_sha"),
             })
+        complete = counts["completed"] == len(steps)
+        terminal = (counts["completed"] + counts["declined"]
+                    + counts["blocked_declined"]) == len(steps)
         return {
             "plan_id": plan_id, "manifest_sha256": meta["manifest_sha256"],
-            "complete": counts["completed"] == len(steps),
+            "complete": complete,
+            "terminal": terminal,
+            "stopped_by_decline": terminal and not complete,
             "counts": counts, "steps": steps,
             "next_ready": [s["step_id"] for s in steps if s["action"] == "READY_TO_ARM"],
             "reconcile_first": [s["step_id"] for s in steps if s["action"] == "RECONCILE_REMOTE_FIRST"],
@@ -208,13 +228,18 @@ class LandingSequence:
         if any(not isinstance(snapshot, dict) for snapshot in snapshots.values()):
             raise LandingStateError("each native readback must be a JSON object")
         results = {}
-        for step in manifest["steps"]:
-            step_id = step["id"]
-            if step_id in snapshots:
-                result = self.journal.reconcile(plan_id, step_id, snapshots[step_id])
-                results[step_id] = {
-                    "state": result["state"], "observation": result["observation"],
-                }
+        # All readbacks commit or roll back together. An exception cannot leave
+        # a half-reconciled dependency chain after a foreground interruption.
+        with self.journal._connect() as db:
+            for step in manifest["steps"]:
+                step_id = step["id"]
+                if step_id in snapshots:
+                    result = self.journal._reconcile_in_transaction(
+                        db, plan_id, step_id, snapshots[step_id]
+                    )
+                    results[step_id] = {
+                        "state": result["state"], "observation": result["observation"],
+                    }
         return {"results": results, "progress": self.status(plan_id)}
 
 
