@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
+import { canonicalWorkspace, canonicalFile, prepareWorkspaceOutput } from './workspace-paths.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -40,11 +41,9 @@ export async function queryCodeKnowledge({
   root = process.cwd(), config = 'tsconfig.json', symbol, definitionFile = null, impact = null,
 } = {}) {
   if (typeof symbol !== 'string' || !symbol.trim()) throw new Error('A nonempty --symbol is required');
-  const workspace = path.resolve(root);
-  const configuration = path.resolve(workspace, config);
-  if (!inside(workspace, configuration)) throw new Error('tsconfig must stay inside the workspace');
-  const chosenFile = definitionFile === null ? null : inside(workspace, path.resolve(workspace, definitionFile));
-  if (definitionFile !== null && !chosenFile) throw new Error('Definition file must stay inside the workspace');
+  const workspace = canonicalWorkspace(root);
+  const configuration = canonicalFile(workspace, config, 'tsconfig');
+  const chosenFile = definitionFile === null ? null : inside(workspace, canonicalFile(workspace, definitionFile, 'Definition file'));
 
   // Reuse the existing compiler-backed diagnostics and dependency-impact engine.
   const analysis = await analyzeCodebase({ root: workspace, config, impact });
@@ -140,10 +139,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
     const result = await queryCodeKnowledge(options);
     const json = JSON.stringify(result, null, 2) + '\n';
     if (options.out) {
-      const root = path.resolve(options.root);
-      const destination = path.resolve(root, options.out);
-      if (!inside(root, destination)) throw new Error('Output path must stay inside workspace');
-      await mkdir(path.dirname(destination), { recursive: true });
+      const destination = await prepareWorkspaceOutput(canonicalWorkspace(options.root), options.out);
       await writeFile(destination, json);
     }
     process.stdout.write(json);
