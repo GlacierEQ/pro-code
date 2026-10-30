@@ -289,7 +289,8 @@ class LandingSequenceTest(unittest.TestCase):
                 raise NativeReadbackUnavailable("GitHub GET result unavailable")
 
         result = self.engine.recover("landing-4", reader=Reader())
-        self.assertEqual(result["readbacks_confirmed"], ["first"])
+        self.assertEqual(result["readbacks_received"], ["first"])
+        self.assertEqual(result["outcomes_confirmed"], ["first"])
         self.assertIn("second", result["progress"]["next_ready"])
         self.assertEqual(result["results"]["first"]["state"], "ALREADY_SATISFIED")
         self.assertIn("parallel", result["readbacks_unavailable"])
@@ -338,6 +339,7 @@ class LandingSequenceTest(unittest.TestCase):
         result = self.engine.recover("landing-4", reader=Reader())
         self.assertTrue(all(v["observation"] == "OUTCOME_NOT_OBSERVED"
                             for v in result["results"].values()))
+        self.assertEqual(result["outcomes_confirmed"], [])
         self.assertEqual(self.engine.status("landing-4")["counts"]["completed"], 0)
 
 
