@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -152,4 +152,30 @@ test('does not falsely mark unresolved static CommonJS imports as complete', asy
     assert.equal(result.scope.analysis_complete, false);
     assert.equal(result.files[0].imports[0].status, 'unresolved');
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('rejects symlinked tsconfig and source paths that escape the workspace', async () => {
+  const root = await fixture({ 'main.ts': 'export const main = true;\n' });
+  const outside = await mkdtemp(path.join(os.tmpdir(), 'pro-code-outside-'));
+  try {
+    await writeFile(path.join(outside, 'external.json'), JSON.stringify({ include: ['**/*.ts'] }));
+    await symlink(path.join(outside, 'external.json'), path.join(root, 'config-link.json'));
+    await assert.rejects(() => analyzeCodebase({ root, config: 'config-link.json' }), /outside the workspace/);
+    await writeFile(path.join(outside, 'external.ts'), 'export const secret = 1;\n');
+    await symlink(path.join(outside, 'external.ts'), path.join(root, 'src', 'linked.ts'));
+    await assert.rejects(() => analyzeCodebase({ root }), /outside the workspace/);
+  } finally { await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); }
+});
+
+test('CLI never writes output through a symlinked report directory', async () => {
+  const root = await fixture({ 'main.ts': 'export const main = true;\n' });
+  const outside = await mkdtemp(path.join(os.tmpdir(), 'pro-code-output-outside-'));
+  const cli = fileURLToPath(new URL('./code-intelligence.mjs', import.meta.url));
+  try {
+    await symlink(outside, path.join(root, 'reports'));
+    await assert.rejects(promisify(execFile)(process.execPath, [
+      cli, '--root', root, '--out', 'reports/result.json',
+    ]), error => error.code === 1 && /Output directory/.test(error.stderr));
+    await assert.rejects(readFile(path.join(outside, 'result.json')), { code: 'ENOENT' });
+  } finally { await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); }
 });
