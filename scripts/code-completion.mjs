@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { resolveCompletion } from './code-completion-resolve.mjs';
 
 const within = (root, target) => {
   const relative = path.relative(root, target);
@@ -20,7 +21,7 @@ function localFile(root, requested, label) {
 }
 
 /** Read-only compiler-backed completions in a real configured TS/JS project. */
-export function completeCode({ root = process.cwd(), config = 'tsconfig.json', file, line, column, limit = 40, prefix = '' } = {}) {
+export function completeCode({ root = process.cwd(), config = 'tsconfig.json', file, line, column, limit = 40, prefix = '', resolveName = null, resolveSource = null } = {}) {
   const workspace = fs.realpathSync(path.resolve(root));
   const configuration = localFile(workspace, config, 'tsconfig');
   const target = localFile(workspace, file, 'target file');
@@ -29,6 +30,7 @@ export function completeCode({ root = process.cwd(), config = 'tsconfig.json', f
   }
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('limit must be an integer from 1 to 100');
   if (typeof prefix !== 'string' || prefix.length > 128) throw new Error('prefix must be at most 128 characters');
+  if (resolveSource !== null && resolveName === null) throw new Error('resolve-source requires resolve-name');
 
   const configFile = ts.readConfigFile(configuration, ts.sys.readFile);
   if (configFile.error) throw new Error(ts.flattenDiagnosticMessageText(configFile.error.messageText, '\n'));
@@ -84,8 +86,11 @@ export function completeCode({ root = process.cwd(), config = 'tsconfig.json', f
       requires_code_action: Boolean(entry.hasAction),
       replacement_span: entry.replacementSpan ?? result?.optionalReplacementSpan ?? null,
     }));
+    const resolution = resolveName === null ? null : resolveCompletion({
+      service, workspace, file: target, position, entries: matches, name: resolveName, source: resolveSource,
+    });
     return {
-      schema_version: '1.0.0',
+      schema_version: '1.1.0',
       operation: 'typescript_language_service_completion',
       file: unix(path.relative(workspace, target)),
       cursor: { line, column, offset: position },
@@ -94,9 +99,12 @@ export function completeCode({ root = process.cwd(), config = 'tsconfig.json', f
       returned: entries.length,
       is_incomplete: result?.isIncomplete ?? false,
       entries,
+      ...(resolution === null ? {} : { resolution }),
       limitations: [
         'Suggestions only; no source files are modified.',
         'An entry requiring a code action may also need import edits and must not be inserted alone.',
+        'Use --resolve-name to retrieve compiler documentation and full workspace-scoped import edit previews; code actions are not applied.',
+        'Actions containing commands or out-of-workspace edits need an authorized integration and cannot be treated as directly applicable.',
         'Completions reflect configured TypeScript/JavaScript project symbols, not AI-generated implementations or validated patches.',
       ],
     };
@@ -106,15 +114,16 @@ export function completeCode({ root = process.cwd(), config = 'tsconfig.json', f
 }
 
 function parseCli(args) {
-  const values = { root: process.cwd(), config: 'tsconfig.json', limit: 40, prefix: '' };
-  const supported = new Set(['root', 'config', 'file', 'line', 'column', 'limit', 'prefix']);
+  const values = { root: process.cwd(), config: 'tsconfig.json', limit: 40, prefix: '', resolveName: null, resolveSource: null };
+  const supported = new Set(['root', 'config', 'file', 'line', 'column', 'limit', 'prefix', 'resolve-name', 'resolve-source']);
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
     const name = flag.startsWith('--') ? flag.slice(2) : '';
     if (!supported.has(name)) throw new Error(`Unknown argument: ${flag}`);
     if (i + 1 >= args.length || args[i + 1].startsWith('--')) throw new Error(`${flag} requires a value`);
     const value = args[++i];
-    values[name] = ['line', 'column', 'limit'].includes(name) ? Number(value) : value;
+    const key = name === 'resolve-name' ? 'resolveName' : name === 'resolve-source' ? 'resolveSource' : name;
+    values[key] = ['line', 'column', 'limit'].includes(name) ? Number(value) : value;
   }
   return values;
 }
