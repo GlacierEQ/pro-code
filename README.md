@@ -216,6 +216,8 @@ Transport credentials remain outside the serialized browser request envelope. A 
 
 Browser memory remains local. The Nexus runtime can persist a memory snapshot to Aspen- or Gemini-named filesystem targets **only when the corresponding local directory environment variable is explicitly configured**. An unconfigured target returns `unsupported`; this is not a claim of live Aspen Grove or Gemini service integration.
 
+Filesystem snapshot writes use a unique, owner-private temporary file per request followed by an atomic rename. Concurrent writers no longer collide on a shared PID-named temp file; unsuccessful attempts clean their temp file. A successful write only confirms that **that** rename succeeded: competing concurrent writers may later replace the snapshot, so there is no multi-writer transaction/merge or durable cross-machine sync guarantee.
+
 ### 5. Native policy boundaries
 
 | Component | Language | Verified repository role |

@@ -1,6 +1,6 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, rename, stat, writeFile } from 'node:fs/promises';
+import { mkdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -208,11 +208,19 @@ async function persistMemory(target, entries, env, now) {
   if (!directory) return { status: 'unsupported', target, reason: `PRO_CODE_${target.toUpperCase()}_DIR is not configured` };
   await mkdir(directory, { recursive: true });
   const destination = path.join(directory, 'pro-code-memory.json');
-  const temporary = `${destination}.${process.pid}.tmp`;
+  // A pid-only temporary name causes concurrent syncs to overwrite or race
+  // one another before the atomic rename. Every attempt needs its own file.
+  const temporary = `${destination}.${process.pid}.${randomUUID()}.tmp`;
   const snapshot = { schema_version: '1.0.0', source: 'pro-code', target, synced_at: now().toISOString(), entries };
   const content = `${JSON.stringify(snapshot, null, 2)}\n`;
-  await writeFile(temporary, content, { encoding: 'utf8', mode: 0o600 });
-  await rename(temporary, destination);
+  try {
+    await writeFile(temporary, content, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    await rename(temporary, destination);
+  } catch (error) {
+    // Remove a failed attempt's own temp file without hiding the write error.
+    await unlink(temporary).catch(() => {});
+    throw error;
+  }
   return {
     status: 'completed', target, path: destination, records_confirmed: entries.length,
     content_digest: createHash('sha256').update(content).digest('hex'), completed_at: snapshot.synced_at,

@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
+import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { startNexusServer } from './nexus.mjs';
 
 let server;
@@ -440,5 +443,41 @@ test('active execution remains single-flight while completed cache is saturated'
   } finally {
     release();
     await new Promise((resolve, reject) => runtime.server.close(error => error ? reject(error) : resolve()));
+  }
+});
+
+test('parallel memory sync writes stay atomic without shared temporary-file races', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'pro-code-memory-atomic-'));
+  const runtime = await startNexusServer({
+    host: '127.0.0.1', port: 0, env: { PRO_CODE_ASPEN_DIR: directory },
+  });
+  try {
+    const responses = await Promise.all(Array.from({ length: 40 }, (_, index) =>
+      fetch(`${runtime.url}/api/v1/memory/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target: 'aspen', entries: [{ writer: index, text: `payload-${index}` }],
+        }),
+      }),
+    ));
+    for (const response of responses) {
+      const body = await response.json();
+      assert.equal(response.status, 200, JSON.stringify(body));
+      assert.equal(body.status, 'completed');
+      assert.equal(body.records_confirmed, 1);
+    }
+    const final = path.join(directory, 'pro-code-memory.json');
+    const snapshot = JSON.parse(await readFile(final, 'utf8'));
+    assert.equal(snapshot.schema_version, '1.0.0');
+    assert.equal(snapshot.entries.length, 1);
+    assert.ok(Number.isInteger(snapshot.entries[0].writer));
+    assert.ok(snapshot.entries[0].writer >= 0 && snapshot.entries[0].writer < 40);
+    const files = await readdir(directory);
+    assert.deepEqual(files, ['pro-code-memory.json'], 'temp files must not survive successful requests');
+    assert.equal((await stat(final)).mode & 0o777, 0o600);
+  } finally {
+    await new Promise((resolve, reject) => runtime.server.close(error => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
   }
 });
