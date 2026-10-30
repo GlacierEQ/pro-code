@@ -117,6 +117,10 @@ python -m tools.github_ops.landing_sequence --db "$STATE_DB" arm --plan my-landi
 # its invocation ID (never invent one). Unknown outcomes require readback first.
 python -m tools.github_ops.landing_journal --db "$STATE_DB" attempt --plan my-landing --step branch --invocation PROVIDER_INVOCATION_ID
 
+# Recover automatically through the existing public GitHub GET-only adapter.
+# No connector write is performed; inaccessible/private PRs remain unresolved.
+python -m tools.github_ops.landing_sequence --db "$STATE_DB" recover --plan my-landing
+
 # Normalize independent native GitHub GET/readback data into JSON mapping
 # step ID to its repository/target/observed fields; reconcile only, no mutation.
 python -m tools.github_ops.landing_sequence --db "$STATE_DB" reconcile --plan my-landing --file native-readbacks.json
@@ -154,6 +158,11 @@ batch. Independent readback of pre-existing outcomes may mark steps
 Each GitHub write remains with the existing host and provider consent mechanism.
 The sequence engine does not call GitHub, mint tokens, trigger approvals,
 create a background daemon, or modify the original workstation `ghl.py`.
+Automatic recovery uses the existing `native_readback.py` adapter only for
+public `merge_pr` / `close_pr` targets, verifying exact PR head and merge
+ancestry. Any inaccessible private PR, unsupported operation, rate limit or
+missing provider evidence remains unresolved. Use consented provider-native
+readbacks plus `reconcile` for those operations, not fake snapshots.
 Its on-disk SQLite journal is scoped to the host holding it; do not claim
 multi-host exactly-once guarantees.
 
