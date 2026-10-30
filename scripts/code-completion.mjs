@@ -18,12 +18,14 @@ function completionActions(root, detail) {
   return (detail?.codeActions ?? []).map(action => ({
     description: action.description,
     requires_commands: Boolean(action.commands?.length),
+    safe_workspace_scope: (action.changes ?? []).every(change => workspaceRelative(root, change.fileName) !== null),
     changes: (action.changes ?? []).map(change => {
       const file = workspaceRelative(root, change.fileName);
       return {
         file,
         within_workspace: file !== null,
-        edits: file === null ? [] : change.textChanges.map(edit => ({
+        is_new_file: Boolean(change.isNewFile),
+        edits: file === null ? [] : (change.textChanges ?? []).map(edit => ({
           span: edit.span, new_text: edit.newText,
         })),
       };
@@ -131,6 +133,7 @@ export function completeCode({
           documentation: ts.displayPartsToString(detail?.documentation ?? []),
           tags: (detail?.tags ?? []).map(tag => ({ name: tag.name, text: ts.displayPartsToString(tag.text ?? []) })),
           code_actions: completionActions(workspace, detail),
+          action_resolved: !entry.hasAction || Boolean(detail?.codeActions?.length),
         } : {}),
       };
     });
@@ -160,6 +163,7 @@ export function completeCode({
       is_dirty: content !== undefined && content !== diskContent,
       prefix_used: inferredPrefix,
       details_included: includeDetails,
+      diagnostic_count: includeDiagnostics ? diagnostics.length : null,
       total_matching: matches.length,
       returned: entries.length,
       is_incomplete: result?.isIncomplete ?? false,
@@ -169,11 +173,12 @@ export function completeCode({
       limitations: [
         'Suggestions and suggested code actions are read-only; no source files are modified.',
         'Editor-buffer completions use a transient unsaved snapshot of the target file; other project files are read from disk.',
-        'Code actions may require coordinated edits; actions targeting files outside the workspace are disclosed without edit text.',
+        'Code actions are read-only proposals requiring editor-revision checks and atomic application of every affected edit.',
+        'Actions targeting outside-workspace symlinks or paths are disclosed without edit text.',
         'An entry requiring a code action may also need import edits and must not be inserted alone.',
         'Completions reflect configured TypeScript/JavaScript project symbols, not AI-generated implementations or validated patches.',
         'Use --resolve-name to retrieve compiler documentation and complete import edit previews; code actions are not applied.',
-        'Code action commands are not executed; out-of-workspace edits are suppressed.',
+        'Compiler code action commands are not executed; cross-workspace edits are suppressed.',
       ],
     };
   } finally {
@@ -189,6 +194,7 @@ function parseCli(args) {
     if (flag === '--auto-prefix') { values.autoPrefix = true; continue; }
     if (flag === '--details') { values.includeDetails = true; continue; }
     if (flag === '--diagnostics') { values.includeDiagnostics = true; continue; }
+    if (flag === '--fail-on-diagnostics') { values.includeDiagnostics = true; values.failOnDiagnostics = true; continue; }
     if (flag === '--content-stdin') { values.content = fs.readFileSync(0, 'utf8'); continue; }
     const name = flag.startsWith('--') ? flag.slice(2) : '';
     if (!supported.has(name)) throw new Error(`Unknown argument: ${flag}`);
@@ -202,7 +208,10 @@ function parseCli(args) {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   try {
-    process.stdout.write(`${JSON.stringify(completeCode(parseCli(process.argv.slice(2))), null, 2)}\n`);
+    const options = parseCli(process.argv.slice(2));
+    const report = completeCode(options);
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    if (options.failOnDiagnostics && report.diagnostic_count > 0) process.exitCode = 1;
   } catch (error) {
     process.stderr.write(`code-completion: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;

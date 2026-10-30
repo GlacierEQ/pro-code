@@ -187,6 +187,40 @@ test('CLI exposes details and diagnostics without requiring an editor or writing
   } finally { dispose(root); }
 });
 
+
+test('completion details expose scoped auto-import actions and compiler JSDoc', () => {
+  const root = fixture({ 'types.ts': '/** A documented export */\nexport const alphaBeta = 1;\n', 'main.ts': 'alp' });
+  try {
+    const result = completeCode({ root, file: 'src/main.ts', line: 1, column: 4, prefix: 'alp', includeDetails: true });
+    const entry = result.entries.find(item => item.name === 'alphaBeta');
+    assert.ok(entry);
+    assert.match(entry.documentation, /documented export/);
+    assert.equal(entry.action_resolved, true);
+    const action = entry.code_actions.find(item => item.changes.some(c => c.file === 'src/main.ts'));
+    assert.ok(action);
+    assert.equal(action.safe_workspace_scope, true);
+    assert.match(action.changes[0].edits[0].new_text, /import\s+\{\s*alphaBeta\s*\}/);
+    assert.equal(readFileSync(path.join(root, 'src/main.ts'), 'utf8'), 'alp');
+  } finally { dispose(root); }
+});
+
+test('diagnostic exit mode keeps JSON and validates unsaved editor buffers without writing', async () => {
+  const root = fixture({ 'main.ts': 'const count: number = 12;\ncount' });
+  const cli = fileURLToPath(new URL('./code-completion.mjs', import.meta.url));
+  const dirty = 'const count: number = "wrong";\ncount';
+  try {
+    const report = completeCode({ root, file: 'src/main.ts', line: 2, column: 6, content: dirty, includeDiagnostics: true });
+    assert.ok(report.diagnostic_count > 0);
+    assert.ok(report.diagnostics.some(d => d.code === 2322 && d.line === 1));
+    assert.equal(completeCode({ root, file: 'src/main.ts', line: 2, column: 6, includeDiagnostics: true }).diagnostic_count, 0);
+    const run = spawnSync(process.execPath, [cli, '--root', root, '--file', 'src/main.ts',
+      '--line', '2', '--column', '6', '--content-stdin', '--fail-on-diagnostics'], { input: dirty, encoding: 'utf8' });
+    assert.equal(run.status, 1);
+    assert.ok(JSON.parse(run.stdout).diagnostic_count > 0);
+    assert.equal(readFileSync(path.join(root, 'src/main.ts'), 'utf8'), 'const count: number = 12;\ncount');
+  } finally { dispose(root); }
+});
+
 test('resolves compiler documentation and complete auto-import edits without writing files', () => {
   const source = 'addVal';
   const root = fixture({
