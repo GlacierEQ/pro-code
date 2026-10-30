@@ -75,3 +75,55 @@ test('CLI emits JSON and fails on missing required position', async () => {
     await assert.rejects(promisify(execFile)(process.execPath, [cli, '--root', root, '--file', 'src/main.ts']), /line and column/);
   } finally { dispose(root); }
 });
+
+
+test('compiler detail resolves auto-import edits and JSDoc without changing the workspace', () => {
+  const source = 'alp';
+  const root = fixture({
+    'types.ts': '/** Curated symbol documentation */\nexport const alphaBeta = 42;\n',
+    'main.ts': source,
+  });
+  try {
+    const report = completeCode({ root, file: 'src/main.ts', line: 1, column: 4, prefix: 'alp', details: true });
+    const entry = report.entries.find(item => item.name === 'alphaBeta');
+    assert.ok(entry, 'exported symbol should be offered by the TypeScript language service');
+    assert.equal(entry.requires_code_action, true);
+    assert.equal(entry.detail.action_resolved, true);
+    assert.match(entry.detail.documentation, /Curated symbol documentation/);
+    const action = entry.detail.code_actions.find(item => item.description.includes('./types'));
+    assert.ok(action, 'compiler should provide an auto-import action');
+    assert.equal(action.safe_workspace_scope, true);
+    assert.equal(action.changes[0].file, 'src/main.ts');
+    assert.match(action.changes[0].edits[0].new_text, /import\s+\{\s*alphaBeta\s*\}/);
+    assert.equal(readFileSync(path.join(root, 'src/main.ts'), 'utf8'), source);
+    assert.equal(report.diagnostic_count, null, 'expensive diagnostics are opt-in');
+  } finally { dispose(root); }
+});
+
+test('diagnostic mode reports source errors with exact locations and does not fake completion success', () => {
+  const root = fixture({ 'main.ts': 'const value: number = "wrong";\nvalue' });
+  try {
+    const report = completeCode({ root, file: 'src/main.ts', line: 2, column: 6, diagnostics: true });
+    assert.ok(report.diagnostic_count >= 1);
+    assert.ok(report.diagnostics.some(item => item.code === 2322 && item.file === 'src/main.ts' && item.line === 1));
+    assert.equal(report.detail_requested, false);
+    assert.equal(report.entries.every(entry => entry.detail === undefined), true);
+  } finally { dispose(root); }
+});
+
+test('CLI details are opt-in and --fail-on-diagnostics preserves JSON before a nonzero exit', async () => {
+  const root = fixture({ 'main.ts': 'const value: number = "bad";\nval' });
+  const cli = fileURLToPath(new URL('./code-completion.mjs', import.meta.url));
+  try {
+    const run = promisify(execFile);
+    const { stdout } = await run(process.execPath, [cli, '--root', root, '--file', 'src/main.ts', '--line', '2', '--column', '4', '--details', '--diagnostics']);
+    const report = JSON.parse(stdout);
+    assert.equal(report.detail_requested, true);
+    assert.ok(report.diagnostic_count > 0);
+    await assert.rejects(run(process.execPath, [cli, '--root', root, '--file', 'src/main.ts', '--line', '2', '--column', '4', '--fail-on-diagnostics']), error => {
+      assert.equal(error.code, 1);
+      assert.ok(JSON.parse(error.stdout).diagnostic_count > 0);
+      return true;
+    });
+  } finally { dispose(root); }
+});
