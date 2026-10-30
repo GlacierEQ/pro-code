@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { startNexusServer } from './nexus.mjs';
 
 let server;
@@ -440,5 +443,39 @@ test('active execution remains single-flight while completed cache is saturated'
   } finally {
     release();
     await new Promise((resolve, reject) => runtime.server.close(error => error ? reject(error) : resolve()));
+  }
+});
+
+test('static serving reads canonical in-root files and SPA fallback without disclosing outside files', async () => {
+  const fixture = mkdtempSync(path.join(tmpdir(), 'pro-code-static-root-'));
+  const root = path.join(fixture, 'dist');
+  const outside = path.join(fixture, 'outside');
+  mkdirSync(root);
+  mkdirSync(outside);
+  writeFileSync(path.join(root, 'index.html'), '<h1>safe index</h1>');
+  writeFileSync(path.join(root, 'app.js'), 'console.log("safe");');
+  writeFileSync(path.join(outside, 'secret.txt'), 'SECRET-DO-NOT-SERVE');
+  symlinkSync(path.join(outside, 'secret.txt'), path.join(root, 'leak.txt'));
+  symlinkSync(outside, path.join(root, 'private'));
+  symlinkSync(path.join(root, 'app.js'), path.join(root, 'alias.js'));
+  const runtime = await startNexusServer({ host: '127.0.0.1', port: 0, staticRoot: root });
+  try {
+    const normal = await fetch(runtime.url + '/app.js');
+    assert.equal(normal.status, 200);
+    assert.equal(await normal.text(), 'console.log("safe");');
+    const alias = await fetch(runtime.url + '/alias.js');
+    assert.equal(alias.status, 200);
+    assert.equal(await alias.text(), 'console.log("safe");');
+    const fallback = await fetch(runtime.url + '/deep/link');
+    assert.equal(fallback.status, 200);
+    assert.equal(await fallback.text(), '<h1>safe index</h1>');
+    for (const filename of ['/leak.txt', '/private/secret.txt', '/%2f..%2foutside%2fsecret.txt']) {
+      const denied = await fetch(runtime.url + filename);
+      assert.equal(denied.status, 404, filename);
+      assert.doesNotMatch(await denied.text(), /SECRET-DO-NOT-SERVE|safe index/, filename);
+    }
+  } finally {
+    await new Promise((resolve, reject) => runtime.server.close(error => error ? reject(error) : resolve()));
+    rmSync(fixture, { recursive: true, force: true });
   }
 });
