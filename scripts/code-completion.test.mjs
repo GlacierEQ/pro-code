@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, symlinkSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -76,38 +76,46 @@ test('CLI emits JSON and fails on missing required position', async () => {
   } finally { dispose(root); }
 });
 
-test('opt-in language-service details include signatures and JSDoc without modifying source', () => {
-  const source = "import type { Profile } from './types';\ndeclare const p: Profile;\np.dis";
-  const root = fixture({
-    'types.ts': 'export interface Profile { /** Public display label. */ displayName: string }\n',
-    'main.ts': source,
-  });
+test('transient editor buffer overrides disk without changing the source file', () => {
+  const original = "interface Profile { oldField: string }\ndeclare const p: Profile;\np.old";
+  const unsaved = "/** Description from the unsaved buffer. */\ninterface Profile { newField: string; newNumber: number }\ndeclare const p: Profile;\np.new";
+  const root = fixture({ 'main.ts': original });
   try {
-    const report = completeCode({ root, file: 'src/main.ts', line: 3, column: 6, prefix: 'display', includeDetails: true });
-    assert.equal(report.details_included, true);
-    const match = report.entries.find(x => x.name === 'displayName');
-    assert.ok(match);
-    assert.match(match.detail.signature, /displayName/);
-    assert.match(match.detail.documentation, /Public display label/);
-    assert.equal(readFileSync(path.join(root, 'src/main.ts'), 'utf8'), source);
-    const quick = completeCode({ root, file: 'src/main.ts', line: 3, column: 6, prefix: 'display' });
-    assert.equal(quick.details_included, false);
-    assert.equal(Object.hasOwn(quick.entries[0], 'detail'), false);
+    const result = completeCode({ root, file: 'src/main.ts', line: 4, column: 6, content: unsaved, autoPrefix: true, includeDetails: true });
+    assert.equal(result.source_kind, 'editor-buffer');
+    assert.equal(result.is_dirty, true);
+    assert.equal(result.prefix_used, 'new');
+    assert.deepEqual(result.entries.map(entry => entry.name).sort(), ['newField', 'newNumber']);
+    assert.ok(result.entries.every(entry => typeof entry.display_text === 'string' && Array.isArray(entry.code_actions)));
+    assert.equal(readFileSync(path.join(root, 'src/main.ts'), 'utf8'), original);
+    assert.deepEqual(completeCode({ root, file: 'src/main.ts', line: 3, column: 6, prefix: 'old' }).entries.map(entry => entry.name), ['oldField']);
   } finally { dispose(root); }
 });
 
-test('CLI --details includes compiler documentation and read-only code action summaries', async () => {
-  const root = fixture({
-    'main.ts': '/** Important value. */\nconst example = 1;\nexa',
-  });
-  const cli = fileURLToPath(new URL('./code-completion.mjs', import.meta.url));
+test('rejects oversized and malformed editor-buffer content', () => {
+  const root = fixture({ 'main.ts': 'const a = 1;\na' });
   try {
-    const { stdout } = await promisify(execFile)(process.execPath,
-      [cli, '--root', root, '--file', 'src/main.ts', '--line', '3', '--column', '4', '--details', '--prefix', 'exa']);
-    const result = JSON.parse(stdout);
-    assert.equal(result.details_included, true);
-    const suggestion = result.entries.find(x => x.name === 'example');
-    assert.match(suggestion.detail.documentation, /Important value/);
-    assert.ok(Array.isArray(suggestion.detail.code_actions));
+    const args = { root, file: 'src/main.ts', line: 2, column: 2 };
+    assert.throws(() => completeCode({ ...args, content: 42 }), /content must/);
+    assert.throws(() => completeCode({ ...args, content: 'x'.repeat(2_097_153) }), /at most 2 MiB/);
+    assert.throws(() => completeCode({ ...args, autoPrefix: 'yes' }), /must be booleans/);
+  } finally { dispose(root); }
+});
+
+test('CLI accepts unsaved text from stdin and provides inferred prefix and detailed symbols', () => {
+  const root = fixture({ 'main.ts': "interface Item { persisted: string }\ndeclare const item: Item;\nitem.per" });
+  const cli = fileURLToPath(new URL('./code-completion.mjs', import.meta.url));
+  const unsaved = "interface Item { current: string }\ndeclare const item: Item;\nitem.cur";
+  try {
+    const result = spawnSync(process.execPath, [
+      cli, '--root', root, '--file', 'src/main.ts', '--line', '3', '--column', '9',
+      '--content-stdin', '--auto-prefix', '--details',
+    ], { input: unsaved, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.deepEqual(report.entries.map(entry => entry.name), ['current']);
+    assert.equal(report.prefix_used, 'cur');
+    assert.equal(report.source_kind, 'editor-buffer');
+    assert.ok(report.entries[0].display_text.includes('current'));
   } finally { dispose(root); }
 });

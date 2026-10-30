@@ -9,6 +9,27 @@ const within = (root, target) => {
 };
 const unix = value => value.split(path.sep).join('/');
 
+function workspaceRelative(root, filename) {
+  const absolute = path.resolve(filename);
+  return within(root, absolute) ? unix(path.relative(root, absolute)) : null;
+}
+
+function completionActions(root, detail) {
+  return (detail?.codeActions ?? []).map(action => ({
+    description: action.description,
+    changes: action.changes.map(change => {
+      const file = workspaceRelative(root, change.fileName);
+      return {
+        file,
+        within_workspace: file !== null,
+        edits: file === null ? [] : change.textChanges.map(edit => ({
+          span: edit.span, new_text: edit.newText,
+        })),
+      };
+    }),
+  }));
+}
+
 function localFile(root, requested, label) {
   if (!requested || typeof requested !== 'string') throw new Error(`${label} is required`);
   const absolute = path.resolve(root, requested);
@@ -20,7 +41,10 @@ function localFile(root, requested, label) {
 }
 
 /** Read-only compiler-backed completions in a real configured TS/JS project. */
-export function completeCode({ root = process.cwd(), config = 'tsconfig.json', file, line, column, limit = 40, prefix = '', includeDetails = false } = {}) {
+export function completeCode({
+  root = process.cwd(), config = 'tsconfig.json', file, line, column,
+  limit = 40, prefix = '', content, autoPrefix = false, includeDetails = false,
+} = {}) {
   const workspace = fs.realpathSync(path.resolve(root));
   const configuration = localFile(workspace, config, 'tsconfig');
   const target = localFile(workspace, file, 'target file');
@@ -29,7 +53,12 @@ export function completeCode({ root = process.cwd(), config = 'tsconfig.json', f
   }
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('limit must be an integer from 1 to 100');
   if (typeof prefix !== 'string' || prefix.length > 128) throw new Error('prefix must be at most 128 characters');
-  if (typeof includeDetails !== 'boolean') throw new Error('includeDetails must be a boolean');
+  if (typeof autoPrefix !== 'boolean' || typeof includeDetails !== 'boolean') {
+    throw new Error('autoPrefix and includeDetails must be booleans');
+  }
+  if (content !== undefined && (typeof content !== 'string' || Buffer.byteLength(content, 'utf8') > 2_097_152)) {
+    throw new Error('content must be a UTF-8 string of at most 2 MiB');
+  }
 
   const configFile = ts.readConfigFile(configuration, ts.sys.readFile);
   if (configFile.error) throw new Error(ts.flattenDiagnosticMessageText(configFile.error.messageText, '\n'));
@@ -39,22 +68,28 @@ export function completeCode({ root = process.cwd(), config = 'tsconfig.json', f
     throw new Error('target file is not included in the TypeScript project');
   }
 
-  const content = fs.readFileSync(target, 'utf8');
+  const diskContent = fs.readFileSync(target, 'utf8');
+  const source = content === undefined ? diskContent : content;
   const starts = [0];
-  for (let i = 0; i < content.length; i++) if (content[i] === '\n') starts.push(i + 1);
+  for (let i = 0; i < source.length; i++) if (source[i] === '\n') starts.push(i + 1);
   if (line > starts.length) throw new Error('line is outside the target file');
   const start = starts[line - 1];
-  const end = line < starts.length ? starts[line] - 1 : content.length;
-  const visibleEnd = end > start && content[end - 1] === '\r' ? end - 1 : end;
+  const end = line < starts.length ? starts[line] - 1 : source.length;
+  const visibleEnd = end > start && source[end - 1] === '\r' ? end - 1 : end;
   if (column > visibleEnd - start + 1) throw new Error('column is outside the requested line');
   const position = start + column - 1;
+  const inferredPrefix = autoPrefix ? source.slice(start, position).match(/[\p{ID_Continue}$]*$/u)?.[0] ?? '' : prefix;
+  if (inferredPrefix.length > 128) throw new Error('inferred prefix exceeds 128 characters');
 
   const host = {
     getScriptFileNames: () => parsed.fileNames,
-    getScriptVersion: () => '0',
+    getScriptVersion: filename => path.resolve(filename) === target && content !== undefined ? '1' : '0',
     getScriptSnapshot: filename => {
-      const source = ts.sys.readFile(filename);
-      return source === undefined ? undefined : ts.ScriptSnapshot.fromString(source);
+      if (path.resolve(filename) === target && content !== undefined) {
+        return ts.ScriptSnapshot.fromString(content);
+      }
+      const fileContent = ts.sys.readFile(filename);
+      return fileContent === undefined ? undefined : ts.ScriptSnapshot.fromString(fileContent);
     },
     getCurrentDirectory: () => workspace,
     getCompilationSettings: () => parsed.options,
@@ -75,14 +110,11 @@ export function completeCode({ root = process.cwd(), config = 'tsconfig.json', f
       includeCompletionsWithInsertText: true,
       includeCompletionsForImportStatements: true,
     });
-    const matches = (result?.entries ?? []).filter(entry => entry.name.toLowerCase().startsWith(prefix.toLowerCase()));
+    const matches = (result?.entries ?? []).filter(entry => entry.name.toLowerCase().startsWith(inferredPrefix.toLowerCase()));
     const entries = matches.slice(0, limit).map(entry => {
-      // Expensive semantic detail lookup is opt-in; the normal path stays fast.
-      // Never apply suggested code actions: their edits are preview metadata only.
-      const detail = includeDetails ? service.getCompletionEntryDetails(
-        target, position, entry.name, {}, entry.source,
-        { includeCompletionsForModuleExports: true }, entry.data,
-      ) : null;
+      const detail = includeDetails
+        ? service.getCompletionEntryDetails(target, position, entry.name, {}, entry.source, {}, entry.data)
+        : undefined;
       return {
         name: entry.name,
         kind: entry.kind,
@@ -91,19 +123,12 @@ export function completeCode({ root = process.cwd(), config = 'tsconfig.json', f
         is_snippet: Boolean(entry.isSnippet),
         requires_code_action: Boolean(entry.hasAction),
         replacement_span: entry.replacementSpan ?? result?.optionalReplacementSpan ?? null,
-        ...(includeDetails ? { detail: detail ? {
-          signature: ts.displayPartsToString(detail.displayParts ?? []).slice(0, 2048),
-          documentation: ts.displayPartsToString(detail.documentation ?? []).slice(0, 4096),
-          tags: (detail.tags ?? []).map(tag => ({
-            name: tag.name,
-            text: typeof tag.text === 'string' ? tag.text : ts.displayPartsToString(tag.text ?? []),
-          })),
-          code_actions: (detail.codeActions ?? []).map(action => ({
-            description: action.description,
-            file_count: action.changes?.length ?? 0,
-            edit_count: (action.changes ?? []).reduce((n, change) => n + (change.textChanges?.length ?? 0), 0),
-          })),
-        } : null } : {}),
+        ...(includeDetails ? {
+          display_text: ts.displayPartsToString(detail?.displayParts ?? []),
+          documentation: ts.displayPartsToString(detail?.documentation ?? []),
+          tags: (detail?.tags ?? []).map(tag => ({ name: tag.name, text: ts.displayPartsToString(tag.text ?? []) })),
+          code_actions: completionActions(workspace, detail),
+        } : {}),
       };
     });
     return {
@@ -112,15 +137,19 @@ export function completeCode({ root = process.cwd(), config = 'tsconfig.json', f
       file: unix(path.relative(workspace, target)),
       cursor: { line, column, offset: position },
       compiler_version: ts.version,
-      total_matching: matches.length,
+      source_kind: content === undefined ? 'disk' : 'editor-buffer',
+      is_dirty: content !== undefined && content !== diskContent,
+      prefix_used: inferredPrefix,
       details_included: includeDetails,
+      total_matching: matches.length,
       returned: entries.length,
       is_incomplete: result?.isIncomplete ?? false,
       entries,
       limitations: [
-        'Suggestions only; no source files are modified.',
+        'Suggestions and suggested code actions are read-only; no source files are modified.',
+        'Editor-buffer completions use a transient unsaved snapshot of the target file; other project files are read from disk.',
+        'Code actions may require coordinated edits; actions targeting files outside the workspace are disclosed without edit text.',
         'An entry requiring a code action may also need import edits and must not be inserted alone.',
-        'Opt-in code action previews include counts and descriptions only; no source mutation is performed.',
         'Completions reflect configured TypeScript/JavaScript project symbols, not AI-generated implementations or validated patches.',
       ],
     };
@@ -130,11 +159,13 @@ export function completeCode({ root = process.cwd(), config = 'tsconfig.json', f
 }
 
 function parseCli(args) {
-  const values = { root: process.cwd(), config: 'tsconfig.json', limit: 40, prefix: '', includeDetails: false };
+  const values = { root: process.cwd(), config: 'tsconfig.json', limit: 40, prefix: '', autoPrefix: false, includeDetails: false };
   const supported = new Set(['root', 'config', 'file', 'line', 'column', 'limit', 'prefix']);
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
+    if (flag === '--auto-prefix') { values.autoPrefix = true; continue; }
     if (flag === '--details') { values.includeDetails = true; continue; }
+    if (flag === '--content-stdin') { values.content = fs.readFileSync(0, 'utf8'); continue; }
     const name = flag.startsWith('--') ? flag.slice(2) : '';
     if (!supported.has(name)) throw new Error(`Unknown argument: ${flag}`);
     if (i + 1 >= args.length || args[i + 1].startsWith('--')) throw new Error(`${flag} requires a value`);
