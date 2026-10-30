@@ -177,6 +177,12 @@ The TypeScript worker layer and local Nexus enforce a fail-closed request shape 
 - external-action prohibition for the local contract;
 - explicit acknowledgement before success.
 
+### Local browser-origin boundary
+
+Nexus no longer returns wildcard `Access-Control-Allow-Origin: *`. By default it accepts browser origins only when both the browser origin and requested Host are loopback (`localhost`, `127.0.0.1`, or `[::1]`). Local development ports may differ. Foreign browser origins, opaque `null` origins and requests explicitly marked `Sec-Fetch-Site: cross-site` without an allowed origin are rejected with HTTP 403 before dispatch or context mutation.
+
+For an intentional non-loopback browser client, configure exact allowed origins using comma-separated `PRO_CODE_ALLOWED_ORIGINS` values, for example `https://operator.example`. This is **browser-origin isolation, not authentication**: direct HTTP clients without an Origin header can still make requests. Keep the service loopback-only unless a trusted authentication and network boundary is separately deployed and verified. The runtime does not trust proxy-supplied forwarding headers to infer origin.
+
 Transport credentials remain outside the serialized browser request envelope. A future authenticated deployment must supply its own trusted authorization/signature boundary and receipts.
 
 ### 4. Memory boundary
