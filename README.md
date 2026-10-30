@@ -75,7 +75,6 @@ The `code:complete` CLI uses the actual TypeScript language service and the proj
 npm ci
 npm run code:complete -- --file src/workers.ts --line 1 --column 1 --limit 25
 npm run test:code-completion
-
 To resolve one candidate into **compiler-derived symbol signatures, documentation, tags and complete import-edit previews**, use:
 
 ```sh
@@ -83,6 +82,8 @@ npm run code:complete -- --file src/workers.ts --line 1 --column 1 --resolve-nam
 ```
 
 For duplicate names from multiple modules, pass `--resolve-source <module>` to identify the exact suggestion. An absent or ambiguous selection is a nonzero error, not a synthetic completion. Returned `resolution.code_actions[].changes` include workspace-relative paths and exact insertion/replacement spans; actions targeting external paths are explicitly marked `within_workspace: false` and their edits withheld. `requires_commands` identifies additional compiler commands that are not executed. **This is an actionable, read-only compiler edit preview**, not a source mutation, build result or deployed integration. Unresolved candidate listings continue to work without `--resolve-name`.
+```
+
 ```
 
 Positions use **1-based lines and columns**. Pass `--root` and `--config` for a different project and `--prefix` to filter suggested names. Results include insertion text, replacement spans where offered, compiler version, and flags for snippets and completion entries requiring additional import/code actions. The command rejects target files outside the workspace, symlink escapes, excluded project files, invalid positions, and unbounded output. No result may be represented as a compiled or applied patch; import code actions need a proper editor/integration before insertion.

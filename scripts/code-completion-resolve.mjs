@@ -8,17 +8,22 @@ const inside = (root, filename) => {
   return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 };
 
-function scopedEdit(workspace, change) {
-  const absolute = path.resolve(change.fileName);
-  // Existing symlinks must be checked against their real destination, not just their lexical path.
+/** Canonical workspace path or null; follows symlinks before exposing edit metadata. */
+export function safeWorkspacePath(workspace, filename) {
+  const absolute = path.resolve(workspace, filename);
   const actual = fs.existsSync(absolute) ? fs.realpathSync(absolute) : absolute;
   if (!inside(workspace, actual)) return null;
-  // A new path could have a symlinked parent. Check the closest existing ancestor.
   let ancestor = path.dirname(absolute);
   while (!fs.existsSync(ancestor) && path.dirname(ancestor) !== ancestor) ancestor = path.dirname(ancestor);
   if (!inside(workspace, fs.realpathSync(ancestor))) return null;
+  return unix(path.relative(workspace, actual));
+}
+
+function scopedEdit(workspace, change) {
+  const file = safeWorkspacePath(workspace, change.fileName);
+  if (file === null) return null;
   return {
-    file: unix(path.relative(workspace, actual)),
+    file,
     is_new_file: Boolean(change.isNewFile),
     text_changes: change.textChanges.map(edit => ({
       start: edit.span.start,
