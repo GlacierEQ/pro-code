@@ -240,3 +240,29 @@ test('local require helpers do not create false module edges', async () => {
     assert.deepEqual(report.impact.affected_files, ['src/base.ts', 'src/real.ts']);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test('one compiler program snapshot is exposed to downstream analysis consumers', async () => {
+  const root = await fixture({
+    'source.ts': 'export const value: number = 7;\n',
+    'reader.ts': "import { value } from './source'; export const answer = value + 1;\n",
+  });
+  try {
+    const programs = [];
+    const result = await analyzeCodebase({
+      root, impact: 'src/source.ts', onProgram: program => programs.push(program),
+    });
+    assert.equal(programs.length, 1);
+    const program = programs[0];
+    assert.equal(typeof program.getTypeChecker, 'function');
+    assert.ok(program.getSourceFiles().some(file => file.fileName.endsWith('src/source.ts')));
+    assert.deepEqual(result.impact.affected_files, ['src/reader.ts', 'src/source.ts']);
+    assert.equal(result.findings.diagnostic_count, 0);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('invalid compiler callback is rejected without silently ignoring it', async () => {
+  const root = await fixture({ 'one.ts': 'export const value = 1;\n' });
+  try {
+    await assert.rejects(() => analyzeCodebase({ root, onProgram: true }), /onProgram must be a function/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
