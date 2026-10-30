@@ -78,7 +78,7 @@ export function completeCode({
   const visibleEnd = end > start && source[end - 1] === '\r' ? end - 1 : end;
   if (column > visibleEnd - start + 1) throw new Error('column is outside the requested line');
   const position = start + column - 1;
-  const inferredPrefix = autoPrefix ? source.slice(start, position).match(/[\\p{ID_Continue}$]*$/u)?.[0] ?? '' : prefix;
+  const inferredPrefix = autoPrefix ? source.slice(start, position).match(/[\p{ID_Continue}$]*$/u)?.[0] ?? '' : prefix;
   if (inferredPrefix.length > 128) throw new Error('inferred prefix exceeds 128 characters');
 
   const host = {
