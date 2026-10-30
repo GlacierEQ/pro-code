@@ -280,25 +280,25 @@ class LandingJournal:
         self._event(db, plan_id, step_id, new_state, {"snapshot_sha256": snapshot_hash})
         return {**dict(self._get(db, plan_id, step_id)), "observation": new_state}
 
-def reconcile_native(self, plan_id: str, step_id: str, reader=None) -> dict:
-    """GET-only GitHub readback; consented writes remain the host's responsibility.
+    def reconcile_native(self, plan_id: str, step_id: str, reader=None) -> dict:
+        """GET-only GitHub readback; consented writes remain the host's responsibility.
 
-    Unknown provider results preserve the current state rather than
-    triggering a blind retry or treating an inaccessible PR as unmerged.
-    """
-    with self._read() as db:
-        row = dict(self._get(db, plan_id, step_id))
-    if row["state"] == "DECLINED":
-        return {**row, "observation": "DECLINED_NOT_RETRIED"}
-    from .native_readback import GitHubReadback, NativeReadbackUnavailable
+        Unknown provider results preserve the current state rather than
+        triggering a blind retry or treating an inaccessible PR as unmerged.
+        """
+        with self._read() as db:
+            row = dict(self._get(db, plan_id, step_id))
+        if row["state"] == "DECLINED":
+            return {**row, "observation": "DECLINED_NOT_RETRIED"}
+        from .native_readback import GitHubReadback, NativeReadbackUnavailable
 
-    try:
-        native = reader if reader is not None else GitHubReadback()
-        snapshot = native.snapshot(json.loads(row["intent_json"]))
-    except (NativeReadbackUnavailable, KeyError, ValueError, TypeError, OSError) as exc:
-        return {**row, "observation": "NATIVE_READBACK_UNAVAILABLE",
-                "reason": str(exc)[:240]}
-    return self.reconcile(plan_id, step_id, snapshot)
+        try:
+            native = reader if reader is not None else GitHubReadback()
+            snapshot = native.snapshot(json.loads(row["intent_json"]))
+        except (NativeReadbackUnavailable, KeyError, ValueError, TypeError, OSError) as exc:
+            return {**row, "observation": "NATIVE_READBACK_UNAVAILABLE",
+                    "reason": str(exc)[:240]}
+        return self.reconcile(plan_id, step_id, snapshot)
 
 
     def status(self, plan_id: str | None = None) -> dict:
