@@ -101,7 +101,7 @@ test('bound limits and CLI JSON are implemented', () => {
 });
 
 test('rejects plan mutation before write or accidental stale re-application', () => {
-  const root = fixture({ 'math.ts': 'export function add(a: number, b: number) { return a + b; }\\n' });
+  const root = fixture({ 'math.ts': 'export function add(a: number, b: number) { return a + b; }\n' });
   try {
     const plan = planCodeRename(options(root));
     const altered = { ...plan, new_name: 'malicious' };
@@ -114,7 +114,7 @@ test('rejects plan mutation before write or accidental stale re-application', ()
 });
 
 test('refactor lock prevents interleaved writes and preserves originals', () => {
-  const root = fixture({ 'math.ts': 'export function add(a: number, b: number) { return a + b; }\\n' });
+  const root = fixture({ 'math.ts': 'export function add(a: number, b: number) { return a + b; }\n' });
   try {
     const plan = planCodeRename(options(root));
     mkdirSync(path.join(root, '.pro-code'));
