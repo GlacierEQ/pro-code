@@ -75,3 +75,39 @@ test('CLI emits JSON and fails on missing required position', async () => {
     await assert.rejects(promisify(execFile)(process.execPath, [cli, '--root', root, '--file', 'src/main.ts']), /line and column/);
   } finally { dispose(root); }
 });
+
+test('opt-in language-service details include signatures and JSDoc without modifying source', () => {
+  const source = "import type { Profile } from './types';\ndeclare const p: Profile;\np.dis";
+  const root = fixture({
+    'types.ts': 'export interface Profile { /** Public display label. */ displayName: string }\\n',
+    'main.ts': source,
+  });
+  try {
+    const report = completeCode({ root, file: 'src/main.ts', line: 3, column: 6, prefix: 'display', includeDetails: true });
+    assert.equal(report.details_included, true);
+    const match = report.entries.find(x => x.name === 'displayName');
+    assert.ok(match);
+    assert.match(match.detail.signature, /displayName/);
+    assert.match(match.detail.documentation, /Public display label/);
+    assert.equal(readFileSync(path.join(root, 'src/main.ts'), 'utf8'), source);
+    const quick = completeCode({ root, file: 'src/main.ts', line: 3, column: 6, prefix: 'display' });
+    assert.equal(quick.details_included, false);
+    assert.equal(Object.hasOwn(quick.entries[0], 'detail'), false);
+  } finally { dispose(root); }
+});
+
+test('CLI --details includes compiler documentation and read-only code action summaries', async () => {
+  const root = fixture({
+    'main.ts': '/** Important value. */\\nconst example = 1;\\nexa',
+  });
+  const cli = fileURLToPath(new URL('./code-completion.mjs', import.meta.url));
+  try {
+    const { stdout } = await promisify(execFile)(process.execPath,
+      [cli, '--root', root, '--file', 'src/main.ts', '--line', '3', '--column', '4', '--details', '--prefix', 'exa']);
+    const result = JSON.parse(stdout);
+    assert.equal(result.details_included, true);
+    const suggestion = result.entries.find(x => x.name === 'example');
+    assert.match(suggestion.detail.documentation, /Important value/);
+    assert.ok(Array.isArray(suggestion.detail.code_actions));
+  } finally { dispose(root); }
+});

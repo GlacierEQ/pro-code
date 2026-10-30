@@ -20,7 +20,7 @@ function localFile(root, requested, label) {
 }
 
 /** Read-only compiler-backed completions in a real configured TS/JS project. */
-export function completeCode({ root = process.cwd(), config = 'tsconfig.json', file, line, column, limit = 40, prefix = '' } = {}) {
+export function completeCode({ root = process.cwd(), config = 'tsconfig.json', file, line, column, limit = 40, prefix = '', includeDetails = false } = {}) {
   const workspace = fs.realpathSync(path.resolve(root));
   const configuration = localFile(workspace, config, 'tsconfig');
   const target = localFile(workspace, file, 'target file');
@@ -29,6 +29,7 @@ export function completeCode({ root = process.cwd(), config = 'tsconfig.json', f
   }
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('limit must be an integer from 1 to 100');
   if (typeof prefix !== 'string' || prefix.length > 128) throw new Error('prefix must be at most 128 characters');
+  if (typeof includeDetails !== 'boolean') throw new Error('includeDetails must be a boolean');
 
   const configFile = ts.readConfigFile(configuration, ts.sys.readFile);
   if (configFile.error) throw new Error(ts.flattenDiagnosticMessageText(configFile.error.messageText, '\n'));
@@ -75,15 +76,36 @@ export function completeCode({ root = process.cwd(), config = 'tsconfig.json', f
       includeCompletionsForImportStatements: true,
     });
     const matches = (result?.entries ?? []).filter(entry => entry.name.toLowerCase().startsWith(prefix.toLowerCase()));
-    const entries = matches.slice(0, limit).map(entry => ({
-      name: entry.name,
-      kind: entry.kind,
-      insert_text: entry.insertText ?? entry.name,
-      source: entry.source ?? null,
-      is_snippet: Boolean(entry.isSnippet),
-      requires_code_action: Boolean(entry.hasAction),
-      replacement_span: entry.replacementSpan ?? result?.optionalReplacementSpan ?? null,
-    }));
+    const entries = matches.slice(0, limit).map(entry => {
+      // Expensive semantic detail lookup is opt-in; the normal path stays fast.
+      // Never apply suggested code actions: their edits are preview metadata only.
+      const detail = includeDetails ? service.getCompletionEntryDetails(
+        target, position, entry.name, {}, entry.source,
+        { includeCompletionsForModuleExports: true }, entry.data,
+      ) : null;
+      return {
+        name: entry.name,
+        kind: entry.kind,
+        insert_text: entry.insertText ?? entry.name,
+        source: entry.source ?? null,
+        is_snippet: Boolean(entry.isSnippet),
+        requires_code_action: Boolean(entry.hasAction),
+        replacement_span: entry.replacementSpan ?? result?.optionalReplacementSpan ?? null,
+        ...(includeDetails ? { detail: detail ? {
+          signature: ts.displayPartsToString(detail.displayParts ?? []).slice(0, 2048),
+          documentation: ts.displayPartsToString(detail.documentation ?? []).slice(0, 4096),
+          tags: (detail.tags ?? []).map(tag => ({
+            name: tag.name,
+            text: typeof tag.text === 'string' ? tag.text : ts.displayPartsToString(tag.text ?? []),
+          })),
+          code_actions: (detail.codeActions ?? []).map(action => ({
+            description: action.description,
+            file_count: action.changes?.length ?? 0,
+            edit_count: (action.changes ?? []).reduce((n, change) => n + (change.textChanges?.length ?? 0), 0),
+          })),
+        } : null } : {}),
+      };
+    });
     return {
       schema_version: '1.0.0',
       operation: 'typescript_language_service_completion',
@@ -91,12 +113,14 @@ export function completeCode({ root = process.cwd(), config = 'tsconfig.json', f
       cursor: { line, column, offset: position },
       compiler_version: ts.version,
       total_matching: matches.length,
+      details_included: includeDetails,
       returned: entries.length,
       is_incomplete: result?.isIncomplete ?? false,
       entries,
       limitations: [
         'Suggestions only; no source files are modified.',
         'An entry requiring a code action may also need import edits and must not be inserted alone.',
+        'Opt-in code action previews include counts and descriptions only; no source mutation is performed.',
         'Completions reflect configured TypeScript/JavaScript project symbols, not AI-generated implementations or validated patches.',
       ],
     };
@@ -106,10 +130,11 @@ export function completeCode({ root = process.cwd(), config = 'tsconfig.json', f
 }
 
 function parseCli(args) {
-  const values = { root: process.cwd(), config: 'tsconfig.json', limit: 40, prefix: '' };
+  const values = { root: process.cwd(), config: 'tsconfig.json', limit: 40, prefix: '', includeDetails: false };
   const supported = new Set(['root', 'config', 'file', 'line', 'column', 'limit', 'prefix']);
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
+    if (flag === '--details') { values.includeDetails = true; continue; }
     const name = flag.startsWith('--') ? flag.slice(2) : '';
     if (!supported.has(name)) throw new Error(`Unknown argument: ${flag}`);
     if (i + 1 >= args.length || args[i + 1].startsWith('--')) throw new Error(`${flag} requires a value`);
