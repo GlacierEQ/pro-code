@@ -249,52 +249,57 @@ class LandingJournal:
             return dict(self._get(db, plan_id, step_id))
 
     def reconcile(self, plan_id: str, step_id: str, snapshot: dict) -> dict:
-        """Reconcile an independent native readback; never dispatch/retry a write."""
+        """Reconcile independent readback without submitting or retrying writes."""
         with self._connect() as db:
-            row = self._get(db, plan_id, step_id)
-            if row["state"] == "DECLINED":
-                return {**dict(row), "observation": "DECLINED_NOT_RETRIED"}
-            intent = json.loads(row["intent_json"])
-            if not isinstance(snapshot, dict) or not matching(
-                {"repository": intent["repository"], "target": intent["target"]}, snapshot
-            ):
-                return {**dict(row), "observation": "TARGET_MISMATCH_OR_UNVERIFIED"}
-            observed = snapshot.get("observed")
-            if not matching(intent["expected"], observed):
-                return {**dict(row), "observation": "OUTCOME_NOT_OBSERVED"}
-            if row["state"] in {"VERIFIED", "ALREADY_SATISFIED"}:
-                return {**dict(row), "observation": row["state"]}
-            new_state = "ALREADY_SATISFIED" if row["state"] in {"PLANNED", "ARMED"} else "VERIFIED"
-            snapshot_hash = fingerprint({
-                "repository": snapshot["repository"], "target": snapshot["target"],
-                "observed": {key: observed[key] for key in intent["expected"]},
-            })
-            db.execute(
-                "UPDATE steps SET state=?,latest_snapshot_sha256=?,changed_at=? WHERE plan_id=? AND step_id=?",
-                (new_state, snapshot_hash, timestamp(), plan_id, step_id),
-            )
-            self._event(db, plan_id, step_id, new_state, {"snapshot_sha256": snapshot_hash})
-            return {**dict(self._get(db, plan_id, step_id)), "observation": new_state}
+            return self._reconcile_in_transaction(db, plan_id, step_id, snapshot)
 
-    def reconcile_native(self, plan_id: str, step_id: str, reader=None) -> dict:
-        """GET-only GitHub readback; consented writes remain the host's responsibility.
-
-        Unknown provider results preserve the current state rather than
-        triggering a blind retry or treating an inaccessible PR as unmerged.
-        """
-        with self._read() as db:
-            row = dict(self._get(db, plan_id, step_id))
+    def _reconcile_in_transaction(self, db, plan_id: str, step_id: str, snapshot: dict) -> dict:
+        """Internal transaction primitive for all-or-nothing sequence readbacks."""
+        row = self._get(db, plan_id, step_id)
         if row["state"] == "DECLINED":
-            return {**row, "observation": "DECLINED_NOT_RETRIED"}
-        from .native_readback import GitHubReadback, NativeReadbackUnavailable
+            return {**dict(row), "observation": "DECLINED_NOT_RETRIED"}
+        intent = json.loads(row["intent_json"])
+        if not isinstance(snapshot, dict) or not matching(
+            {"repository": intent["repository"], "target": intent["target"]}, snapshot
+        ):
+            return {**dict(row), "observation": "TARGET_MISMATCH_OR_UNVERIFIED"}
+        observed = snapshot.get("observed")
+        if not matching(intent["expected"], observed):
+            return {**dict(row), "observation": "OUTCOME_NOT_OBSERVED"}
+        if row["state"] in {"VERIFIED", "ALREADY_SATISFIED"}:
+            return {**dict(row), "observation": row["state"]}
+        new_state = "ALREADY_SATISFIED" if row["state"] in {"PLANNED", "ARMED"} else "VERIFIED"
+        snapshot_hash = fingerprint({
+            "repository": snapshot["repository"], "target": snapshot["target"],
+            "observed": {key: observed[key] for key in intent["expected"]},
+        })
+        db.execute(
+            "UPDATE steps SET state=?,latest_snapshot_sha256=?,changed_at=? WHERE plan_id=? AND step_id=?",
+            (new_state, snapshot_hash, timestamp(), plan_id, step_id),
+        )
+        self._event(db, plan_id, step_id, new_state, {"snapshot_sha256": snapshot_hash})
+        return {**dict(self._get(db, plan_id, step_id)), "observation": new_state}
 
-        try:
-            native = reader if reader is not None else GitHubReadback()
-            snapshot = native.snapshot(json.loads(row["intent_json"]))
-        except (NativeReadbackUnavailable, KeyError, ValueError, TypeError, OSError) as exc:
-            return {**row, "observation": "NATIVE_READBACK_UNAVAILABLE",
-                    "reason": str(exc)[:240]}
-        return self.reconcile(plan_id, step_id, snapshot)
+def reconcile_native(self, plan_id: str, step_id: str, reader=None) -> dict:
+    """GET-only GitHub readback; consented writes remain the host's responsibility.
+
+    Unknown provider results preserve the current state rather than
+    triggering a blind retry or treating an inaccessible PR as unmerged.
+    """
+    with self._read() as db:
+        row = dict(self._get(db, plan_id, step_id))
+    if row["state"] == "DECLINED":
+        return {**row, "observation": "DECLINED_NOT_RETRIED"}
+    from .native_readback import GitHubReadback, NativeReadbackUnavailable
+
+    try:
+        native = reader if reader is not None else GitHubReadback()
+        snapshot = native.snapshot(json.loads(row["intent_json"]))
+    except (NativeReadbackUnavailable, KeyError, ValueError, TypeError, OSError) as exc:
+        return {**row, "observation": "NATIVE_READBACK_UNAVAILABLE",
+                "reason": str(exc)[:240]}
+    return self.reconcile(plan_id, step_id, snapshot)
+
 
     def status(self, plan_id: str | None = None) -> dict:
         with self._read() as db:
