@@ -153,3 +153,36 @@ test('does not falsely mark unresolved static CommonJS imports as complete', asy
     assert.equal(result.files[0].imports[0].status, 'unresolved');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+
+test('impact explains shortest dependency chain and direct dependents in a diamond', async () => {
+  const root = await fixture({
+    'base.ts': 'export const root = 1;\n',
+    'left.ts': "import { root } from './base'; export const left = root + 1;\n",
+    'right.ts': "import { root } from './base'; export const right = root + 2;\n",
+    'top.ts': "import { left } from './left'; import { right } from './right'; export const total = left + right;\n",
+  });
+  try {
+    const report = await analyzeCodebase({ root, impact: 'src/base.ts' });
+    assert.deepEqual(report.impact.direct_dependents, ['src/left.ts', 'src/right.ts']);
+    assert.deepEqual(report.impact.dependency_paths['src/base.ts'], ['src/base.ts']);
+    assert.deepEqual(report.impact.dependency_paths['src/top.ts'], ['src/base.ts', 'src/left.ts', 'src/top.ts']);
+    assert.deepEqual(Object.keys(report.impact.dependency_paths).sort(), report.impact.affected_files);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('local shadowed require functions and parameters are not fabricated dependency edges', async () => {
+  const root = await fixture({
+    'base.ts': 'export const root = 1;\n',
+    'local.ts': "const require = (path: string) => path; export const value = require('./base');\n",
+    'nested.ts': "export function use(require: (path: string) => string) { return require('./base'); }\n",
+    'ambient.ts': "declare const require: (path: string) => any; export const trueLoader = require('./base');\n",
+  });
+  try {
+    const report = await analyzeCodebase({ root, impact: 'src/base.ts' });
+    assert.equal(report.files.find(file => file.path === 'src/local.ts').imports.length, 0);
+    assert.equal(report.files.find(file => file.path === 'src/nested.ts').imports.length, 0);
+    assert.deepEqual(report.impact.affected_files, ['src/ambient.ts', 'src/base.ts']);
+    assert.equal(report.findings.unresolved_import_count, 0);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
