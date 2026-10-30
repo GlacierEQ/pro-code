@@ -179,3 +179,33 @@ test('CLI never writes output through a symlinked report directory', async () =>
     await assert.rejects(readFile(path.join(outside, 'result.json')), { code: 'ENOENT' });
   } finally { await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); }
 });
+
+test('compiler errors cannot be represented as a complete analysis', async () => {
+  const root = await fixture({ 'broken.ts': "export const n: number = 'not a number';\n" });
+  try {
+    const result = await analyzeCodebase({ root });
+    assert.ok(result.findings.diagnostic_count > 0);
+    assert.equal(result.scope.analysis_complete, false);
+    const cli = fileURLToPath(new URL('./code-intelligence.mjs', import.meta.url));
+    await assert.rejects(
+      promisify(execFile)(process.execPath, [cli, '--root', root, '--fail-on-incomplete']),
+      error => error.code === 1,
+    );
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('local declaration imports outside the source index do not vanish into external success', async () => {
+  const root = await fixture({
+    'main.ts': "import type { Value } from './values'; export const item: Value = { n: 2 };\n",
+    'values.d.ts': 'export interface Value { n: number }\n',
+  });
+  try {
+    const result = await analyzeCodebase({ root });
+    const item = result.files.find(x => x.path === 'src/main.ts');
+    assert.equal(item.imports[0].status, 'internal-unindexed');
+    assert.equal(item.imports[0].target, 'src/values.d.ts');
+    assert.equal(result.findings.unindexed_internal_import_count, 1);
+    assert.equal(result.findings.diagnostic_count, 0);
+    assert.equal(result.scope.analysis_complete, false);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
