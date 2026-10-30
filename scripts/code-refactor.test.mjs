@@ -99,3 +99,27 @@ test('bound limits and CLI JSON are implemented', () => {
     assert.match(read(root, 'math.ts'), /function add/);
   } finally { dispose(root); }
 });
+
+test('rejects plan mutation before write or accidental stale re-application', () => {
+  const root = fixture({ 'math.ts': 'export function add(a: number, b: number) { return a + b; }\n' });
+  try {
+    const plan = planCodeRename(options(root));
+    const altered = { ...plan, new_name: 'malicious' };
+    assert.throws(() => applyCodeRename(altered), /plan changed after preview/);
+    assert.match(read(root, 'math.ts'), /function add/);
+    const result = applyCodeRename(plan);
+    assert.equal(result.readback_verified, true);
+    assert.throws(() => applyCodeRename(plan), /source changed after preview/);
+  } finally { dispose(root); }
+});
+
+test('refactor lock prevents interleaved writes and preserves originals', () => {
+  const root = fixture({ 'math.ts': 'export function add(a: number, b: number) { return a + b; }\n' });
+  try {
+    const plan = planCodeRename(options(root));
+    mkdirSync(path.join(root, '.pro-code'));
+    writeFileSync(path.join(root, '.pro-code', 'semantic-refactor.lock'), 'held');
+    assert.throws(() => applyCodeRename(plan), /EEXIST/);
+    assert.match(read(root, 'math.ts'), /function add/);
+  } finally { dispose(root); }
+});
