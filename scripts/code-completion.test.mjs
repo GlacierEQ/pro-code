@@ -77,8 +77,8 @@ test('CLI emits JSON and fails on missing required position', async () => {
 });
 
 test('transient editor buffer overrides disk without changing the source file', () => {
-  const original = "interface Profile { oldField: string }\\ndeclare const p: Profile;\\np.old";
-  const unsaved = "/** Description from the unsaved buffer. */\\ninterface Profile { newField: string; newNumber: number }\\ndeclare const p: Profile;\\np.new";
+  const original = "interface Profile { oldField: string }\ndeclare const p: Profile;\np.old";
+  const unsaved = "/** Description from the unsaved buffer. */\ninterface Profile { newField: string; newNumber: number }\ndeclare const p: Profile;\np.new";
   const root = fixture({ 'main.ts': original });
   try {
     const result = completeCode({ root, file: 'src/main.ts', line: 4, column: 6, content: unsaved, autoPrefix: true, includeDetails: true });
@@ -93,7 +93,7 @@ test('transient editor buffer overrides disk without changing the source file', 
 });
 
 test('rejects oversized and malformed editor-buffer content', () => {
-  const root = fixture({ 'main.ts': 'const a = 1;\\na' });
+  const root = fixture({ 'main.ts': 'const a = 1;\na' });
   try {
     const args = { root, file: 'src/main.ts', line: 2, column: 2 };
     assert.throws(() => completeCode({ ...args, content: 42 }), /content must/);
@@ -103,9 +103,9 @@ test('rejects oversized and malformed editor-buffer content', () => {
 });
 
 test('CLI accepts unsaved text from stdin and provides inferred prefix and detailed symbols', () => {
-  const root = fixture({ 'main.ts': "interface Item { persisted: string }\\ndeclare const item: Item;\\nitem.per" });
+  const root = fixture({ 'main.ts': "interface Item { persisted: string }\ndeclare const item: Item;\nitem.per" });
   const cli = fileURLToPath(new URL('./code-completion.mjs', import.meta.url));
-  const unsaved = "interface Item { current: string }\\ndeclare const item: Item;\\nitem.cur";
+  const unsaved = "interface Item { current: string }\ndeclare const item: Item;\nitem.cur";
   try {
     const result = spawnSync(process.execPath, [
       cli, '--root', root, '--file', 'src/main.ts', '--line', '3', '--column', '9',
