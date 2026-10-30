@@ -77,6 +77,17 @@ npm run code:complete -- --file src/workers.ts --line 1 --column 1 --limit 25
 npm run test:code-completion
 ```
 
+
+### Compiler-resolved completion details and diagnostics
+
+Use the opt-in TypeScript language-service details when a suggestion needs an import, and include syntax/semantic diagnostics for the target file:
+
+```bash
+npm run code:complete -- --file src/workers.ts --line 1 --column 1 --limit 25 --details --diagnostics
+```
+
+`--details` asks TypeScript for symbol information, documentation and **real compiler-proposed code actions** (including auto-import text changes, file-relative paths and exact spans). It does **not** apply those edits, install packages, or certify the result. Text changes outside the resolved workspace are not surfaced. `--diagnostics` adds compiler syntax and semantic diagnostics with error codes and 1-based locations. Both switches are optional to keep ordinary completion fast. Validate edits with the compiler, tests and repository CI before using them in production.
+
 Positions use **1-based lines and columns**. Pass `--root` and `--config` for a different project and `--prefix` to filter suggested names. Results include insertion text, replacement spans where offered, compiler version, and flags for snippets and completion entries requiring additional import/code actions. The command rejects target files outside the workspace, symlink escapes, excluded project files, invalid positions, and unbounded output. No result may be represented as a compiled or applied patch; import code actions need a proper editor/integration before insertion.
 
 ## Run it
