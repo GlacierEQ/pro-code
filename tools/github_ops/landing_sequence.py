@@ -243,10 +243,40 @@ class LandingSequence:
         return {"results": results, "progress": self.status(plan_id)}
 
 
+    def recover(self, plan_id: str, reader=None) -> dict:
+        """Read actual GitHub PR state and resume safe portions of the sequence.
+
+        This is GET-only. Private or inaccessible PRs remain unresolved and do
+        not cause any write, retry, fabricated result or terminal failure.
+        """
+        from .native_readback import GitHubReadback, NativeReadbackUnavailable
+
+        source = reader if reader is not None else GitHubReadback()
+        manifest = self.manifest(plan_id)
+        current = {row["step_id"]: row for row in self.journal.status(plan_id)["steps"]}
+        snapshots, unavailable = {}, {}
+        for step in manifest["steps"]:
+            step_id = step["id"]
+            state = current[step_id]["state"]
+            if state in CONFIRMED or state == "DECLINED":
+                continue
+            try:
+                snapshots[step_id] = source.snapshot(step["intent"])
+            except (NativeReadbackUnavailable, KeyError, TypeError, ValueError, OSError) as error:
+                unavailable[step_id] = str(error)[:240]
+        reconciled = self.reconcile_many(plan_id, snapshots)
+        return {
+            "readbacks_confirmed": list(snapshots),
+            "readbacks_unavailable": unavailable,
+            "results": reconciled["results"],
+            "progress": reconciled["progress"],
+        }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Resume consented GitHub sequences without replaying uncertain writes")
     parser.add_argument("--db", required=True, help="Local durable journal database")
-    parser.add_argument("action", choices=("install", "status", "arm", "reconcile"))
+    parser.add_argument("action", choices=("install", "status", "arm", "reconcile", "recover"))
     parser.add_argument("--plan", help="Existing plan ID")
     parser.add_argument("--step", help="Step ID for arm")
     parser.add_argument("--file", help="JSON manifest for install or step->readback map for reconcile")
@@ -262,6 +292,8 @@ def main() -> None:
                 parser.error("--plan required")
             if options.action == "status":
                 result = engine.status(options.plan)
+            elif options.action == "recover":
+                result = engine.recover(options.plan)
             elif options.action == "arm":
                 if not options.step:
                     parser.error("arm requires --step")
