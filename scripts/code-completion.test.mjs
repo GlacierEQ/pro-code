@@ -79,7 +79,7 @@ test('CLI emits JSON and fails on missing required position', async () => {
 test('opt-in language-service details include signatures and JSDoc without modifying source', () => {
   const source = "import type { Profile } from './types';\ndeclare const p: Profile;\np.dis";
   const root = fixture({
-    'types.ts': 'export interface Profile { /** Public display label. */ displayName: string }\\n',
+    'types.ts': 'export interface Profile { /** Public display label. */ displayName: string }\n',
     'main.ts': source,
   });
   try {
@@ -98,7 +98,7 @@ test('opt-in language-service details include signatures and JSDoc without modif
 
 test('CLI --details includes compiler documentation and read-only code action summaries', async () => {
   const root = fixture({
-    'main.ts': '/** Important value. */\\nconst example = 1;\\nexa',
+    'main.ts': '/** Important value. */\nconst example = 1;\nexa',
   });
   const cli = fileURLToPath(new URL('./code-completion.mjs', import.meta.url));
   try {
