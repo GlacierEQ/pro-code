@@ -278,5 +278,68 @@ class LandingSequenceTest(unittest.TestCase):
         self.assertEqual(result["progress"]["next_ready"], ["parallel"])
 
 
+    def test_native_recovery_unlocks_existing_merged_pr(self):
+        from tools.github_ops.native_readback import NativeReadbackUnavailable
+        self.install()
+
+        class Reader:
+            def snapshot(self, change):
+                if change["target"] == "pull/10":
+                    return snapshot(10)
+                raise NativeReadbackUnavailable("GitHub GET result unavailable")
+
+        result = self.engine.recover("landing-4", reader=Reader())
+        self.assertEqual(result["readbacks_confirmed"], ["first"])
+        self.assertIn("second", result["progress"]["next_ready"])
+        self.assertEqual(result["results"]["first"]["state"], "ALREADY_SATISFIED")
+        self.assertIn("parallel", result["readbacks_unavailable"])
+
+    def test_native_recovery_continues_independent_progress(self):
+        from tools.github_ops.native_readback import NativeReadbackUnavailable
+        self.install()
+
+        class Reader:
+            def snapshot(self, change):
+                if change["target"] == "pull/12":
+                    return snapshot(12)
+                raise NativeReadbackUnavailable("not public or not yet merged")
+
+        result = self.engine.recover("landing-4", reader=Reader())
+        self.assertEqual(result["results"]["parallel"]["state"], "ALREADY_SATISFIED")
+        self.assertIn("first", result["progress"]["next_ready"])
+        self.assertEqual(self.steps()["second"]["action"], "WAIT_DEPENDENCIES")
+        self.assertFalse(result["progress"]["terminal"])
+
+    def test_native_recovery_does_not_override_refused_consent(self):
+        self.install()
+        self.engine.journal.declined("landing-4", "first")
+        observed = []
+
+        class Reader:
+            def snapshot(self, change):
+                observed.append(change["target"])
+                return snapshot(int(change["target"].split("/")[1]),
+                                SHA2 if change["target"] == "pull/11" else SHA1)
+
+        result = self.engine.recover("landing-4", reader=Reader())
+        self.assertNotIn("pull/10", observed)
+        self.assertEqual(result["progress"]["steps"][0]["state"], "DECLINED")
+        self.assertEqual(result["progress"]["steps"][1]["action"], "COMPLETE")
+        # Only the independently confirmed external outcome can be marked
+        # complete; the declined authorization is never rewritten.
+
+    def test_native_recovery_refuses_wrong_head(self):
+        self.install()
+
+        class Reader:
+            def snapshot(self, change):
+                return snapshot(int(change["target"].split("/")[1]), "f" * 40)
+
+        result = self.engine.recover("landing-4", reader=Reader())
+        self.assertTrue(all(v["observation"] == "OUTCOME_NOT_OBSERVED"
+                            for v in result["results"].values()))
+        self.assertEqual(self.engine.status("landing-4")["counts"]["completed"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
