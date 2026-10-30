@@ -27,7 +27,20 @@ function diagnosticRecord(root, diagnostic) {
   };
 }
 
-function sourceImports(sourceFile) {
+function sourceImports(sourceFile, checker) {
+  function locallyBoundRequire(identifier) {
+    const binding = checker.getSymbolAtLocation(identifier);
+    return (binding?.declarations ?? []).some(declaration => {
+      if (ts.isParameter(declaration) || ts.isImportSpecifier(declaration) ||
+          ts.isImportClause(declaration) || ts.isImportEqualsDeclaration(declaration)) return true;
+      if (ts.isFunctionDeclaration(declaration)) return Boolean(declaration.body);
+      if (ts.isVariableDeclaration(declaration)) {
+        const statement = declaration.parent?.parent;
+        return !(statement && (ts.getCombinedModifierFlags(statement) & ts.ModifierFlags.Ambient));
+      }
+      return false;
+    });
+  }
   const imports = [];
   const push = (specifier, kind, line) => imports.push({ specifier, kind, line });
   function visit(node) {
@@ -47,7 +60,8 @@ function sourceImports(sourceFile) {
         && ts.isIdentifier(expression.expression)
         && expression.expression.text === 'require'
         && expression.name.text === 'resolve';
-      if (isImport || isRequire || isRequireResolve) {
+      const requireName = isRequire ? expression : isRequireResolve ? expression.expression : null;
+      if (isImport || ((isRequire || isRequireResolve) && !locallyBoundRequire(requireName))) {
         const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
         const firstArgument = node.arguments[0];
         const specifier = firstArgument && ts.isStringLiteralLike(firstArgument) ? firstArgument.text : null;
@@ -81,7 +95,7 @@ export async function analyzeCodebase({ root = process.cwd(), config = 'tsconfig
   const resolutionCache = ts.createModuleResolutionCache(workspaceRoot, name => ts.sys.useCaseSensitiveFileNames ? name : name.toLowerCase(), parsed.options);
   const files = sourceFiles.map(file => {
     const filename = normalize(path.relative(workspaceRoot, file.fileName));
-    const edges = sourceImports(file).map(item => {
+    const edges = sourceImports(file, checker).map(item => {
       if (!item.specifier) return { ...item, kind: item.kind, status: 'dynamic-unknown', target: null };
       const resolution = ts.resolveModuleName(item.specifier, file.fileName, parsed.options, ts.sys, resolutionCache).resolvedModule;
       if (!resolution) return { ...item, status: 'unresolved', target: null };
@@ -98,17 +112,33 @@ export async function analyzeCodebase({ root = process.cwd(), config = 'tsconfig
   const reverse = new Map(files.map(file => [file.path, new Set()]));
   for (const file of files) for (const imp of file.imports) if (imp.status === 'internal') reverse.get(imp.target)?.add(file.path);
   let affected = null;
+  let impactDetails = null;
   let requested = null;
   if (impact !== null) {
     requested = normalize(path.relative(workspaceRoot, path.resolve(workspaceRoot, impact)));
     if (!fileSet.has(requested)) throw new Error(`Impact target is not included in the TypeScript program: ${requested}`);
     const visited = new Set([requested]);
+    const predecessor = new Map([[requested, null]]);
     const queue = [requested];
     for (let index = 0; index < queue.length; index++) {
       const next = [...(reverse.get(queue[index]) ?? [])].sort();
-      for (const dependent of next) if (!visited.has(dependent)) { visited.add(dependent); queue.push(dependent); }
+      for (const dependent of next) if (!visited.has(dependent)) {
+        visited.add(dependent);
+        predecessor.set(dependent, queue[index]);
+        queue.push(dependent);
+      }
     }
     affected = [...visited].sort();
+    const dependencyPaths = {};
+    for (const file of affected) {
+      const chain = [];
+      for (let cursor = file; cursor !== null; cursor = predecessor.get(cursor) ?? null) chain.push(cursor);
+      dependencyPaths[file] = chain.reverse();
+    }
+    impactDetails = {
+      direct_dependents: [...(reverse.get(requested) ?? [])].sort(),
+      dependency_paths: dependencyPaths,
+    };
   }
   const allImports = files.flatMap(file => file.imports.map(imp => ({ importer: file.path, ...imp })));
   const unresolvedCount = allImports.filter(imp => imp.status === 'unresolved').length;
@@ -121,11 +151,11 @@ export async function analyzeCodebase({ root = process.cwd(), config = 'tsconfig
       'Dependency graph includes source files in the TypeScript program only, not every file in the repository.',
       'Workspace-local files outside the indexed program are explicitly classified internal-unindexed, not silently assumed covered.',
       'Non-literal import() and CommonJS require()/require.resolve() paths cannot be resolved statically; their presence is reported explicitly.',
-      'CommonJS require-call detection is syntax-based and does not establish whether a locally shadowed require is the Node.js loader.',
+      'Compiler bindings exclude locally shadowed require functions; ambient/global requires still depend on runtime loader behavior.',
       'Static diagnostics and dependency analysis are not proof of production behavior or safe deployment.',
     ],
     findings: { diagnostic_count: diagnostics.length, unresolved_import_count: unresolvedCount, dynamic_unknown_count: dynamicUnknownCount, unindexed_internal_import_count: unindexedInternalCount },
-    diagnostics, files, impact: requested === null ? null : { target: requested, affected_files: affected },
+    diagnostics, files, impact: requested === null ? null : { target: requested, affected_files: affected, ...impactDetails },
   };
 }
 
