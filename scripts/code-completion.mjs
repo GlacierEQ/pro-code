@@ -20,7 +20,7 @@ function localFile(root, requested, label) {
 }
 
 /** Read-only compiler-backed completions in a real configured TS/JS project. */
-export function completeCode({ root = process.cwd(), config = 'tsconfig.json', file, line, column, limit = 40, prefix = '' } = {}) {
+export function completeCode({ root = process.cwd(), config = 'tsconfig.json', file, line, column, limit = 40, prefix = '', includeDetails = false, includeDiagnostics = false } = {}) {
   const workspace = fs.realpathSync(path.resolve(root));
   const configuration = localFile(workspace, config, 'tsconfig');
   const target = localFile(workspace, file, 'target file');
@@ -29,6 +29,9 @@ export function completeCode({ root = process.cwd(), config = 'tsconfig.json', f
   }
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('limit must be an integer from 1 to 100');
   if (typeof prefix !== 'string' || prefix.length > 128) throw new Error('prefix must be at most 128 characters');
+  if (typeof includeDetails !== 'boolean' || typeof includeDiagnostics !== 'boolean') {
+    throw new Error('includeDetails and includeDiagnostics must be booleans');
+  }
 
   const configFile = ts.readConfigFile(configuration, ts.sys.readFile);
   if (configFile.error) throw new Error(ts.flattenDiagnosticMessageText(configFile.error.messageText, '\n'));
@@ -75,15 +78,61 @@ export function completeCode({ root = process.cwd(), config = 'tsconfig.json', f
       includeCompletionsForImportStatements: true,
     });
     const matches = (result?.entries ?? []).filter(entry => entry.name.toLowerCase().startsWith(prefix.toLowerCase()));
-    const entries = matches.slice(0, limit).map(entry => ({
-      name: entry.name,
-      kind: entry.kind,
-      insert_text: entry.insertText ?? entry.name,
-      source: entry.source ?? null,
-      is_snippet: Boolean(entry.isSnippet),
-      requires_code_action: Boolean(entry.hasAction),
-      replacement_span: entry.replacementSpan ?? result?.optionalReplacementSpan ?? null,
-    }));
+    const entries = matches.slice(0, limit).map(entry => {
+      // Completion entry details resolve auto-import edits through the same compiler
+      // program as the suggestion. No edits are applied to the workspace.
+      let details = null;
+      if (includeDetails) {
+        const resolved = service.getCompletionEntryDetails(
+          target, position, entry.name, {}, entry.source, {}, entry.data,
+        );
+        if (resolved) {
+          details = {
+            display: ts.displayPartsToString(resolved.displayParts ?? []),
+            documentation: ts.displayPartsToString(resolved.documentation ?? []),
+            code_actions: (resolved.codeActions ?? []).map(action => ({
+              description: action.description,
+              changes: (action.changes ?? []).map(change => {
+                const absolute = path.resolve(change.fileName);
+                const safe = within(workspace, absolute)
+                  && (!fs.existsSync(absolute) || within(workspace, fs.realpathSync(absolute)));
+                if (!safe) return null;
+                return {
+                  file: unix(path.relative(workspace, absolute)),
+                  text_changes: change.textChanges.map(edit => ({
+                    span: edit.span,
+                    new_text: edit.newText,
+                  })),
+                };
+              }).filter(Boolean),
+            })),
+          };
+        }
+      }
+      return {
+        name: entry.name,
+        kind: entry.kind,
+        insert_text: entry.insertText ?? entry.name,
+        source: entry.source ?? null,
+        is_snippet: Boolean(entry.isSnippet),
+        requires_code_action: Boolean(entry.hasAction),
+        replacement_span: entry.replacementSpan ?? result?.optionalReplacementSpan ?? null,
+        ...(includeDetails ? { details } : {}),
+      };
+    });
+    const diagnostics = includeDiagnostics
+      ? [...service.getSyntacticDiagnostics(target), ...service.getSemanticDiagnostics(target)].map(d => {
+        const where = d.file && Number.isInteger(d.start) ? d.file.getLineAndCharacterOfPosition(d.start) : null;
+        return {
+          code: d.code,
+          category: ts.DiagnosticCategory[d.category].toLowerCase(),
+          message: ts.flattenDiagnosticMessageText(d.messageText, '\\n'),
+          line: where ? where.line + 1 : null,
+          column: where ? where.character + 1 : null,
+        };
+      }).sort((left, right) => (left.line ?? 0) - (right.line ?? 0)
+        || (left.column ?? 0) - (right.column ?? 0) || left.code - right.code)
+      : null;
     return {
       schema_version: '1.0.0',
       operation: 'typescript_language_service_completion',
@@ -94,9 +143,11 @@ export function completeCode({ root = process.cwd(), config = 'tsconfig.json', f
       returned: entries.length,
       is_incomplete: result?.isIncomplete ?? false,
       entries,
+      ...(includeDiagnostics ? { diagnostics } : {}),
       limitations: [
         'Suggestions only; no source files are modified.',
         'An entry requiring a code action may also need import edits and must not be inserted alone.',
+        'Code action text changes are read-only proposals, not validated patches. Inspect and verify before applying.',
         'Completions reflect configured TypeScript/JavaScript project symbols, not AI-generated implementations or validated patches.',
       ],
     };
@@ -107,11 +158,15 @@ export function completeCode({ root = process.cwd(), config = 'tsconfig.json', f
 
 function parseCli(args) {
   const values = { root: process.cwd(), config: 'tsconfig.json', limit: 40, prefix: '' };
-  const supported = new Set(['root', 'config', 'file', 'line', 'column', 'limit', 'prefix']);
+  const supported = new Set(['root', 'config', 'file', 'line', 'column', 'limit', 'prefix', 'details', 'diagnostics']);
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
     const name = flag.startsWith('--') ? flag.slice(2) : '';
     if (!supported.has(name)) throw new Error(`Unknown argument: ${flag}`);
+    if (name === 'details' || name === 'diagnostics') {
+      values[name === 'details' ? 'includeDetails' : 'includeDiagnostics'] = true;
+      continue;
+    }
     if (i + 1 >= args.length || args[i + 1].startsWith('--')) throw new Error(`${flag} requires a value`);
     const value = args[++i];
     values[name] = ['line', 'column', 'limit'].includes(name) ? Number(value) : value;
