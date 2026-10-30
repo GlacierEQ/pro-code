@@ -329,6 +329,11 @@ export function createNexusHandler({ env = process.env, now = () => new Date(), 
             return;
           }
           const original = existing.payload ?? await existing.inFlight;
+          if (existing.payload) {
+            // Recently observed completed receipts remain resident longer.
+            idempotency.delete(key);
+            idempotency.set(key, existing);
+          }
           sendJson(response, original.success ? 200 : 501, original, { 'X-Idempotent-Replay': 'true' });
           return;
         }
@@ -343,7 +348,16 @@ export function createNexusHandler({ env = process.env, now = () => new Date(), 
           idempotency.delete(key);
           throw error;
         }
+        // The receipt journal is bounded. Retaining every completed replay key
+        // forever would otherwise leak memory under long-lived local operation.
+        idempotency.delete(key);
         idempotency.set(key, { envelopeDigest, payload });
+        for (const [oldKey, record] of idempotency) {
+          if (idempotency.size <= MAX_RECEIPTS) break;
+          // Never evict running work: doing so could execute a concurrent
+          // replay twice. The bound applies to completed receipts only.
+          if (!record.inFlight) idempotency.delete(oldKey);
+        }
         receipts.unshift(payload.receipt);
         if (receipts.length > MAX_RECEIPTS) receipts.length = MAX_RECEIPTS;
         sendJson(response, payload.success ? 200 : 501, payload);
