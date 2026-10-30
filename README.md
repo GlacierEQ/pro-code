@@ -75,6 +75,30 @@ The `code:complete` CLI uses the actual TypeScript language service and the proj
 npm ci
 npm run code:complete -- --file src/workers.ts --line 1 --column 1 --limit 25
 npm run test:code-completion
+To resolve one candidate into **compiler-derived symbol signatures, documentation, tags and complete import-edit previews**, use:
+
+```sh
+npm run code:complete -- --file src/workers.ts --line 1 --column 1 --resolve-name ExampleName
+```
+
+For duplicate names from multiple modules, pass `--resolve-source <module>` to identify the exact suggestion. An absent or ambiguous selection is a nonzero error, not a synthetic completion. Returned `resolution.code_actions[].changes` include workspace-relative paths and exact insertion/replacement spans; actions targeting external paths are explicitly marked `within_workspace: false` and their edits withheld. `requires_commands` identifies additional compiler commands that are not executed. **This is an actionable, read-only compiler edit preview**, not a source mutation, build result or deployed integration. Unresolved candidate listings continue to work without `--resolve-name`.
+```
+
+```
+
+```
+
+
+### Compiler-resolved completion details and diagnostics
+
+Use the opt-in TypeScript language-service details when a suggestion needs an import, and include syntax/semantic diagnostics for the target file:
+
+```bash
+npm run code:complete -- --file src/workers.ts --line 1 --column 1 --limit 25 --details --diagnostics
+```
+
+`--details` asks TypeScript for symbol information, documentation and **real compiler-proposed code actions** (including auto-import text changes, file-relative paths and exact spans). It does **not** apply those edits, install packages, or certify the result. Text changes outside the resolved workspace are not surfaced. `--diagnostics` adds compiler syntax and semantic diagnostics with error codes and 1-based locations. Both switches are optional to keep ordinary completion fast. Validate edits with the compiler, tests and repository CI before using them in production.
+
 ```
 
 
