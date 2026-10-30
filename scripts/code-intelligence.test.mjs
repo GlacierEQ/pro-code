@@ -209,3 +209,34 @@ test('local declaration imports outside the source index do not vanish into exte
     assert.equal(result.scope.analysis_complete, false);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+
+test('impact chains expose deterministic shortest causes in a diamond', async () => {
+  const root = await fixture({
+    'base.ts': 'export const seed = 1;\n',
+    'left.ts': "import { seed } from './base'; export const left = seed + 1;\n",
+    'right.ts': "import { seed } from './base'; export const right = seed + 2;\n",
+    'top.ts': "import { left } from './left'; import { right } from './right'; export const total = left + right;\n",
+  });
+  try {
+    const report = await analyzeCodebase({ root, impact: 'src/base.ts' });
+    assert.deepEqual(report.impact.direct_dependents, ['src/left.ts', 'src/right.ts']);
+    assert.deepEqual(report.impact.dependency_paths['src/top.ts'], ['src/base.ts', 'src/left.ts', 'src/top.ts']);
+    assert.deepEqual(Object.keys(report.impact.dependency_paths).sort(), report.impact.affected_files);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('local require helpers do not create false module edges', async () => {
+  const root = await fixture({
+    'base.ts': 'export const answer = 1;\n',
+    'local.ts': "const require = (name: string) => name; export const fake = require('./base');\n",
+    'param.ts': "export function injected(require: (name: string) => string) { return require('./base'); }\n",
+    'real.ts': "declare const require: (name: string) => any; export const actual = require('./base');\n",
+  });
+  try {
+    const report = await analyzeCodebase({ root, impact: 'src/base.ts' });
+    assert.equal(report.files.find(file => file.path === 'src/local.ts').imports.length, 0);
+    assert.equal(report.files.find(file => file.path === 'src/param.ts').imports.length, 0);
+    assert.deepEqual(report.impact.affected_files, ['src/base.ts', 'src/real.ts']);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
