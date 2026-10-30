@@ -78,7 +78,7 @@ test('CLI emits JSON and fails on missing required position', async () => {
 
 test('compiler-backed completion details include a real auto-import edit proposal', () => {
   const root = fixture({
-    'library.ts': 'export function rocketLaunch(): void {}\\n',
+    'library.ts': 'export function rocketLaunch(): void {}\n',
     'main.ts': 'rock',
   });
   try {
@@ -103,7 +103,7 @@ test('compiler-backed completion details include a real auto-import edit proposa
 
 test('optional compiler diagnostics report semantic errors with source locations', () => {
   const root = fixture({
-    'main.ts': 'const answer: number = "wrong";\\nans',
+    'main.ts': 'const answer: number = "wrong";\nans',
   });
   try {
     const report = completeCode({
@@ -125,7 +125,7 @@ test('optional compiler diagnostics report semantic errors with source locations
 
 test('CLI exposes details and diagnostics without requiring an editor or writing files', async () => {
   const root = fixture({
-    'library.ts': 'export const stellarObject = 42;\\n',
+    'library.ts': 'export const stellarObject = 42;\n',
     'main.ts': 'stel',
   });
   const cli = fileURLToPath(new URL('./code-completion.mjs', import.meta.url));
