@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, symlinkSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -76,54 +76,146 @@ test('CLI emits JSON and fails on missing required position', async () => {
   } finally { dispose(root); }
 });
 
+test('transient editor buffer overrides disk without changing the source file', () => {
+  const original = "interface Profile { oldField: string }\ndeclare const p: Profile;\np.old";
+  const unsaved = "/** Description from the unsaved buffer. */\ninterface Profile { newField: string; newNumber: number }\ndeclare const p: Profile;\np.new";
+  const root = fixture({ 'main.ts': original });
+  try {
+    const result = completeCode({ root, file: 'src/main.ts', line: 4, column: 6, content: unsaved, autoPrefix: true, includeDetails: true });
+    assert.equal(result.source_kind, 'editor-buffer');
+    assert.equal(result.is_dirty, true);
+    assert.equal(result.prefix_used, 'new');
+    assert.deepEqual(result.entries.map(entry => entry.name).sort(), ['newField', 'newNumber']);
+    assert.ok(result.entries.every(entry => typeof entry.display_text === 'string' && Array.isArray(entry.code_actions)));
+    assert.equal(readFileSync(path.join(root, 'src/main.ts'), 'utf8'), original);
+    assert.deepEqual(completeCode({ root, file: 'src/main.ts', line: 3, column: 6, prefix: 'old' }).entries.map(entry => entry.name), ['oldField']);
+  } finally { dispose(root); }
+});
 
-test('compiler detail resolves auto-import edits and JSDoc without changing the workspace', () => {
-  const source = 'alp';
+test('rejects oversized and malformed editor-buffer content', () => {
+  const root = fixture({ 'main.ts': 'const a = 1;\na' });
+  try {
+    const args = { root, file: 'src/main.ts', line: 2, column: 2 };
+    assert.throws(() => completeCode({ ...args, content: 42 }), /content must/);
+    assert.throws(() => completeCode({ ...args, content: 'x'.repeat(2_097_153) }), /at most 2 MiB/);
+    assert.throws(() => completeCode({ ...args, autoPrefix: 'yes' }), /must be booleans/);
+  } finally { dispose(root); }
+});
+
+test('CLI accepts unsaved text from stdin and provides inferred prefix and detailed symbols', () => {
+  const root = fixture({ 'main.ts': "interface Item { persisted: string }\ndeclare const item: Item;\nitem.per" });
+  const cli = fileURLToPath(new URL('./code-completion.mjs', import.meta.url));
+  const unsaved = "interface Item { current: string }\ndeclare const item: Item;\nitem.cur";
+  try {
+    const result = spawnSync(process.execPath, [
+      cli, '--root', root, '--file', 'src/main.ts', '--line', '3', '--column', '9',
+      '--content-stdin', '--auto-prefix', '--details',
+    ], { input: unsaved, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.deepEqual(report.entries.map(entry => entry.name), ['current']);
+    assert.equal(report.prefix_used, 'cur');
+    assert.equal(report.source_kind, 'editor-buffer');
+    assert.ok(report.entries[0].display_text.includes('current'));
+  } finally { dispose(root); }
+});
+
+test('compiler-backed completion details include a real auto-import edit proposal', () => {
   const root = fixture({
-    'types.ts': '/** Curated symbol documentation */\nexport const alphaBeta = 42;\n',
-    'main.ts': source,
+    'library.ts': 'export function rocketLaunch(): void {}\n',
+    'main.ts': 'rock',
   });
   try {
-    const report = completeCode({ root, file: 'src/main.ts', line: 1, column: 4, prefix: 'alp', details: true });
-    const entry = report.entries.find(item => item.name === 'alphaBeta');
-    assert.ok(entry, 'exported symbol should be offered by the TypeScript language service');
-    assert.equal(entry.requires_code_action, true);
-    assert.equal(entry.detail.action_resolved, true);
-    assert.match(entry.detail.documentation, /Curated symbol documentation/);
-    const action = entry.detail.code_actions.find(item => item.description.includes('./types'));
-    assert.ok(action, 'compiler should provide an auto-import action');
-    assert.equal(action.safe_workspace_scope, true);
-    assert.equal(action.changes[0].file, 'src/main.ts');
-    assert.match(action.changes[0].edits[0].new_text, /import\s+\{\s*alphaBeta\s*\}/);
-    assert.equal(readFileSync(path.join(root, 'src/main.ts'), 'utf8'), source);
-    assert.equal(report.diagnostic_count, null, 'expensive diagnostics are opt-in');
+    const initial = readFileSync(path.join(root, 'src/main.ts'), 'utf8');
+    const result = completeCode({
+      root, file: 'src/main.ts', line: 1, column: 5,
+      prefix: 'rocket', includeDetails: true,
+    });
+    const suggestion = result.entries.find(entry => entry.name === 'rocketLaunch');
+    assert.ok(suggestion, 'compiler should offer the module export');
+    assert.equal(suggestion.requires_code_action, true);
+    assert.ok(suggestion.code_actions?.length, 'auto-import must have a concrete code action');
+    const edits = suggestion.code_actions.flatMap(action => action.changes);
+    assert.ok(edits.some(edit => edit.file === 'src/main.ts'
+      && edit.edits.some(change => change.new_text.includes('import'))));
+    assert.equal(readFileSync(path.join(root, 'src/main.ts'), 'utf8'), initial, 'completion must remain read-only');
+    assert.ok(!Object.hasOwn(completeCode({
+      root, file: 'src/main.ts', line: 1, column: 5, prefix: 'rocket',
+    }).entries[0], 'code_actions'), 'expensive details are strictly opt-in');
   } finally { dispose(root); }
 });
 
-test('diagnostic mode reports source errors with exact locations and does not fake completion success', () => {
-  const root = fixture({ 'main.ts': 'const value: number = "wrong";\nvalue' });
+test('optional compiler diagnostics report semantic errors with source locations', () => {
+  const root = fixture({
+    'main.ts': 'const answer: number = "wrong";\nans',
+  });
   try {
-    const report = completeCode({ root, file: 'src/main.ts', line: 2, column: 6, diagnostics: true });
-    assert.ok(report.diagnostic_count >= 1);
-    assert.ok(report.diagnostics.some(item => item.code === 2322 && item.file === 'src/main.ts' && item.line === 1));
-    assert.equal(report.detail_requested, false);
-    assert.equal(report.entries.every(entry => entry.detail === undefined), true);
+    const report = completeCode({
+      root, file: 'src/main.ts', line: 2, column: 4,
+      prefix: 'ans', includeDiagnostics: true,
+    });
+    const error = report.diagnostics.find(item => item.code === 2322);
+    assert.ok(error, 'TypeScript must detect incompatible assignment');
+    assert.equal(error.category, 'error');
+    assert.equal(error.line, 1);
+    assert.ok(error.column >= 1);
+    const plain = completeCode({ root, file: 'src/main.ts', line: 2, column: 4 });
+    assert.equal(Object.hasOwn(plain, 'diagnostics'), false);
+    assert.throws(() => completeCode({
+      root, file: 'src/main.ts', line: 2, column: 4, includeDetails: 'true',
+    }), /must be booleans/);
   } finally { dispose(root); }
 });
 
-test('CLI details are opt-in and --fail-on-diagnostics preserves JSON before a nonzero exit', async () => {
-  const root = fixture({ 'main.ts': 'const value: number = "bad";\nval' });
+test('CLI exposes details and diagnostics without requiring an editor or writing files', async () => {
+  const root = fixture({
+    'library.ts': 'export const stellarObject = 42;\n',
+    'main.ts': 'stel',
+  });
   const cli = fileURLToPath(new URL('./code-completion.mjs', import.meta.url));
   try {
-    const run = promisify(execFile);
-    const { stdout } = await run(process.execPath, [cli, '--root', root, '--file', 'src/main.ts', '--line', '2', '--column', '4', '--details', '--diagnostics']);
+    const { stdout } = await promisify(execFile)(process.execPath, [
+      cli, '--root', root, '--file', 'src/main.ts', '--line', '1',
+      '--column', '5', '--prefix', 'stellar', '--details', '--diagnostics',
+    ]);
     const report = JSON.parse(stdout);
-    assert.equal(report.detail_requested, true);
+    assert.ok(Array.isArray(report.diagnostics));
+    assert.ok(report.entries.some(item => item.name === 'stellarObject'
+      && item.code_actions.length > 0));
+    await assert.rejects(promisify(execFile)(process.execPath, [cli, '--wat']), /Unknown argument/);
+  } finally { dispose(root); }
+});
+
+
+test('completion details expose scoped auto-import actions and compiler JSDoc', () => {
+  const root = fixture({ 'types.ts': '/** A documented export */\nexport const alphaBeta = 1;\n', 'main.ts': 'alp' });
+  try {
+    const result = completeCode({ root, file: 'src/main.ts', line: 1, column: 4, prefix: 'alp', includeDetails: true });
+    const entry = result.entries.find(item => item.name === 'alphaBeta');
+    assert.ok(entry);
+    assert.match(entry.documentation, /documented export/);
+    assert.equal(entry.action_resolved, true);
+    const action = entry.code_actions.find(item => item.changes.some(c => c.file === 'src/main.ts'));
+    assert.ok(action);
+    assert.equal(action.safe_workspace_scope, true);
+    assert.match(action.changes[0].edits[0].new_text, /import\s+\{\s*alphaBeta\s*\}/);
+    assert.equal(readFileSync(path.join(root, 'src/main.ts'), 'utf8'), 'alp');
+  } finally { dispose(root); }
+});
+
+test('diagnostic exit mode keeps JSON and validates unsaved editor buffers without writing', async () => {
+  const root = fixture({ 'main.ts': 'const count: number = 12;\ncount' });
+  const cli = fileURLToPath(new URL('./code-completion.mjs', import.meta.url));
+  const dirty = 'const count: number = "wrong";\ncount';
+  try {
+    const report = completeCode({ root, file: 'src/main.ts', line: 2, column: 6, content: dirty, includeDiagnostics: true });
     assert.ok(report.diagnostic_count > 0);
-    await assert.rejects(run(process.execPath, [cli, '--root', root, '--file', 'src/main.ts', '--line', '2', '--column', '4', '--fail-on-diagnostics']), error => {
-      assert.equal(error.code, 1);
-      assert.ok(JSON.parse(error.stdout).diagnostic_count > 0);
-      return true;
-    });
+    assert.ok(report.diagnostics.some(d => d.code === 2322 && d.line === 1));
+    assert.equal(completeCode({ root, file: 'src/main.ts', line: 2, column: 6, includeDiagnostics: true }).diagnostic_count, 0);
+    const run = spawnSync(process.execPath, [cli, '--root', root, '--file', 'src/main.ts',
+      '--line', '2', '--column', '6', '--content-stdin', '--fail-on-diagnostics'], { input: dirty, encoding: 'utf8' });
+    assert.equal(run.status, 1);
+    assert.ok(JSON.parse(run.stdout).diagnostic_count > 0);
+    assert.equal(readFileSync(path.join(root, 'src/main.ts'), 'utf8'), 'const count: number = 12;\ncount');
   } finally { dispose(root); }
 });

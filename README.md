@@ -65,7 +65,7 @@ npm run code:inspect -- --impact src/workers.ts --out .pro-code/runtime/impact.j
 npm run test:code-intelligence
 ```
 
-This resolves static/re-export, literal dynamic imports and CommonJS `require()` / `require.resolve()` dependency edges using TypeScript's compiler API. Locally shadowed `require` functions/parameters are excluded using compiler-resolved bindings. Impact reports now include sorted immediate dependents and deterministic shortest transitive dependency paths explaining *why* each file is affected. It enumerates module exports, reports actual compiler diagnostics and unresolved imports, and computes transitive reverse dependencies for the requested file. The report is machine-readable JSON with exact file paths, counts, limitations and compiler version. Nonliteral module paths are explicitly unknown, and unresolved references cause `scope.analysis_complete` to be `false`. Use `--fail-on-incomplete` to return a nonzero exit code for incomplete dependency graphs (in addition to `--fail-on-diagnostics` for compiler errors); a JSON report is still written for investigation. Files outside the configured TypeScript project are not silently counted as analyzed. Ambient/global CommonJS loader declarations are still interpreted as loader calls; runtime environment behavior is not proved by static analysis. This is a developer/CI tool using the existing TypeScript dev dependency, not a deployed Nexus worker or a claim that every language is analyzed.
+This resolves static/re-export, literal dynamic imports and CommonJS `require()` / `require.resolve()` dependency edges using TypeScript's compiler API. New explainable impact reports list direct dependents and deterministic shortest paths to all transitively affected files; compiler symbol binding checks exclude local functions and parameters named `require`. It enumerates module exports, reports actual compiler diagnostics and unresolved imports, and computes transitive reverse dependencies for the requested file. The report is machine-readable JSON with exact file paths, counts, limitations and compiler version. Nonliteral module paths are explicitly unknown, and unresolved references cause `scope.analysis_complete` to be `false`. Use `--fail-on-incomplete` to return a nonzero exit code for incomplete dependency graphs (in addition to `--fail-on-diagnostics` for compiler errors); a JSON report is still written for investigation. Files outside the configured TypeScript project are not silently counted as analyzed. Ambient/global `require` references remain statically analyzed; real runtime module-loader behavior is not proven. This is a developer/CI tool using the existing TypeScript dev dependency, not a deployed Nexus worker or a claim that every language is analyzed.
 
 ## Compiler-backed code completion
 
@@ -74,11 +74,37 @@ The `code:complete` CLI uses the actual TypeScript language service and the proj
 ```bash
 npm ci
 npm run code:complete -- --file src/workers.ts --line 1 --column 1 --limit 25
-npm run code:complete -- --file src/workers.ts --line 1 --column 1 --prefix work --details --diagnostics
 npm run test:code-completion
 ```
 
-Positions use **1-based lines and columns**. Pass `--root` and `--config` for a different project and `--prefix` to filter suggested names. Results include insertion text, replacement spans where offered, compiler version, and flags for snippets and completion entries requiring additional import/code actions. With `--details`, the compiler resolves signatures, JSDoc, tags and exact import/code-action text edits for the bounded suggestion page; edit spans are offsets into the current source, with workspace-scope flags for every changed file. These are **read-only edit plans**, not applied patches: editor integrations must verify the source revision and apply a complete action atomically. With `--diagnostics`, the same command reports actual syntactic and semantic TypeScript diagnostics for the target file; `--fail-on-diagnostics` emits the JSON report and exits nonzero if errors or other diagnostics are present. Both analysis modes are opt-in to keep default completions fast. The command rejects target files outside the workspace, symlink escapes, excluded project files, invalid positions, and unbounded output. No result may be represented as a compiled or applied patch.
+
+### Compiler-resolved completion details and diagnostics
+
+Use the opt-in TypeScript language-service details when a suggestion needs an import, and include syntax/semantic diagnostics for the target file:
+
+```bash
+npm run code:complete -- --file src/workers.ts --line 1 --column 1 --limit 25 --details --diagnostics
+```
+
+`--details` asks TypeScript for symbol information, documentation and **real compiler-proposed code actions** (including auto-import text changes, file-relative paths and exact spans). It does **not** apply those edits, install packages, or certify the result. Text changes outside the resolved workspace are not surfaced. `--diagnostics` adds compiler syntax and semantic diagnostics with error codes and 1-based locations. Both switches are optional to keep ordinary completion fast. `--fail-on-diagnostics` also emits the machine-readable report, then exits nonzero if the active source/editor buffer contains diagnostics. Code actions report `safe_workspace_scope` and reject symlink escapes; they remain read-only proposals to apply against an exact matching editor revision. Validate edits with the compiler, tests and repository CI before using them in production.
+
+Positions use **1-based lines and columns**. Pass `--root` and `--config` for a different project and `--prefix` to filter suggested names. Results include insertion text, replacement spans where offered, compiler version, and flags for snippets and completion entries requiring additional import/code actions. The command rejects target files outside the workspace, symlink escapes, excluded project files, invalid positions, and unbounded output. No result may be represented as a compiled or applied patch; import code actions need a proper editor/integration before insertion.
+
+## Executable compiler-aware refactoring
+
+`code:refactor` adds actual cross-file TypeScript symbol renames to the existing completion, compiler-inspection, and symbol-knowledge tools. It uses TypeScript's rename locations, not text search; unrelated same-spelling local symbols stay untouched.
+
+```bash
+# Read-only plan, with exact source/output SHA-256 and per-file edits
+npm run code:refactor -- --file src/workers.ts --line 1 --column 1 --new-name replacementName
+
+# Apply only when explicitly requested
+npm run code:refactor -- --file src/workers.ts --line 1 --column 1 --new-name replacementName --apply
+
+npm run test:code-refactor
+```
+
+The selected cursor must point to a renameable identifier, using 1-based line/column coordinates. Preview never writes. The engine rejects files outside the configured TypeScript project or the workspace, realpath escapes, invalid identifiers, overlapping edits, change-bound overruns, and renames that introduce new compiler diagnostics. Each affected file must still match the preview's observed SHA-256 before any write; the apply step uses same-directory atomic file replacements and verifies readback hashes. A later write failure triggers best-effort rollback of already changed files. **This is not a crash-safe multi-file transaction**: interruption between writes can leave partial changes, so use Git and CI for durable rollback/recovery. The tool does not perform GitHub pushes or bypass connector consent.
 
 ## Run it
 

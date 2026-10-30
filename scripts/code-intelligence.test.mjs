@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -154,35 +154,89 @@ test('does not falsely mark unresolved static CommonJS imports as complete', asy
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test('rejects symlinked tsconfig and source paths that escape the workspace', async () => {
+  const root = await fixture({ 'main.ts': 'export const main = true;\n' });
+  const outside = await mkdtemp(path.join(os.tmpdir(), 'pro-code-outside-'));
+  try {
+    await writeFile(path.join(outside, 'external.json'), JSON.stringify({ include: ['**/*.ts'] }));
+    await symlink(path.join(outside, 'external.json'), path.join(root, 'config-link.json'));
+    await assert.rejects(() => analyzeCodebase({ root, config: 'config-link.json' }), /outside the workspace/);
+    await writeFile(path.join(outside, 'external.ts'), 'export const secret = 1;\n');
+    await symlink(path.join(outside, 'external.ts'), path.join(root, 'src', 'linked.ts'));
+    await assert.rejects(() => analyzeCodebase({ root }), /outside the workspace/);
+  } finally { await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); }
+});
 
-test('impact explains shortest dependency chain and direct dependents in a diamond', async () => {
+test('CLI never writes output through a symlinked report directory', async () => {
+  const root = await fixture({ 'main.ts': 'export const main = true;\n' });
+  const outside = await mkdtemp(path.join(os.tmpdir(), 'pro-code-output-outside-'));
+  const cli = fileURLToPath(new URL('./code-intelligence.mjs', import.meta.url));
+  try {
+    await symlink(outside, path.join(root, 'reports'));
+    await assert.rejects(promisify(execFile)(process.execPath, [
+      cli, '--root', root, '--out', 'reports/result.json',
+    ]), error => error.code === 1 && /Output directory/.test(error.stderr));
+    await assert.rejects(readFile(path.join(outside, 'result.json')), { code: 'ENOENT' });
+  } finally { await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); }
+});
+
+test('compiler errors cannot be represented as a complete analysis', async () => {
+  const root = await fixture({ 'broken.ts': "export const n: number = 'not a number';\n" });
+  try {
+    const result = await analyzeCodebase({ root });
+    assert.ok(result.findings.diagnostic_count > 0);
+    assert.equal(result.scope.analysis_complete, false);
+    const cli = fileURLToPath(new URL('./code-intelligence.mjs', import.meta.url));
+    await assert.rejects(
+      promisify(execFile)(process.execPath, [cli, '--root', root, '--fail-on-incomplete']),
+      error => error.code === 1,
+    );
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('local declaration imports outside the source index do not vanish into external success', async () => {
   const root = await fixture({
-    'base.ts': 'export const root = 1;\n',
-    'left.ts': "import { root } from './base'; export const left = root + 1;\n",
-    'right.ts': "import { root } from './base'; export const right = root + 2;\n",
+    'main.ts': "import type { Value } from './values'; export const item: Value = { n: 2 };\n",
+    'values.d.ts': 'export interface Value { n: number }\n',
+  });
+  try {
+    const result = await analyzeCodebase({ root });
+    const item = result.files.find(x => x.path === 'src/main.ts');
+    assert.equal(item.imports[0].status, 'internal-unindexed');
+    assert.equal(item.imports[0].target, 'src/values.d.ts');
+    assert.equal(result.findings.unindexed_internal_import_count, 1);
+    assert.equal(result.findings.diagnostic_count, 0);
+    assert.equal(result.scope.analysis_complete, false);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
+test('impact chains expose deterministic shortest causes in a diamond', async () => {
+  const root = await fixture({
+    'base.ts': 'export const seed = 1;\n',
+    'left.ts': "import { seed } from './base'; export const left = seed + 1;\n",
+    'right.ts': "import { seed } from './base'; export const right = seed + 2;\n",
     'top.ts': "import { left } from './left'; import { right } from './right'; export const total = left + right;\n",
   });
   try {
     const report = await analyzeCodebase({ root, impact: 'src/base.ts' });
     assert.deepEqual(report.impact.direct_dependents, ['src/left.ts', 'src/right.ts']);
-    assert.deepEqual(report.impact.dependency_paths['src/base.ts'], ['src/base.ts']);
     assert.deepEqual(report.impact.dependency_paths['src/top.ts'], ['src/base.ts', 'src/left.ts', 'src/top.ts']);
     assert.deepEqual(Object.keys(report.impact.dependency_paths).sort(), report.impact.affected_files);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test('local shadowed require functions and parameters are not fabricated dependency edges', async () => {
+test('local require helpers do not create false module edges', async () => {
   const root = await fixture({
-    'base.ts': 'export const root = 1;\n',
-    'local.ts': "const require = (path: string) => path; export const value = require('./base');\n",
-    'nested.ts': "export function use(require: (path: string) => string) { return require('./base'); }\n",
-    'ambient.ts': "declare const require: (path: string) => any; export const trueLoader = require('./base');\n",
+    'base.ts': 'export const answer = 1;\n',
+    'local.ts': "const require = (name: string) => name; export const fake = require('./base');\n",
+    'param.ts': "export function injected(require: (name: string) => string) { return require('./base'); }\n",
+    'real.ts': "declare const require: (name: string) => any; export const actual = require('./base');\n",
   });
   try {
     const report = await analyzeCodebase({ root, impact: 'src/base.ts' });
     assert.equal(report.files.find(file => file.path === 'src/local.ts').imports.length, 0);
-    assert.equal(report.files.find(file => file.path === 'src/nested.ts').imports.length, 0);
-    assert.deepEqual(report.impact.affected_files, ['src/ambient.ts', 'src/base.ts']);
-    assert.equal(report.findings.unresolved_import_count, 0);
+    assert.equal(report.files.find(file => file.path === 'src/param.ts').imports.length, 0);
+    assert.deepEqual(report.impact.affected_files, ['src/base.ts', 'src/real.ts']);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

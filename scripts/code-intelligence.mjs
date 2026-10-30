@@ -1,4 +1,5 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
+import { canonicalWorkspace, canonicalFile, prepareWorkspaceOutput } from './workspace-paths.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -27,17 +28,15 @@ function diagnosticRecord(root, diagnostic) {
 }
 
 function sourceImports(sourceFile, checker) {
-  // Ambient 'declare const require' remains an eligible module loader.
-  // Locally implemented functions, parameters and imports named require do not.
-  function isLocallyImplementedRequire(identifier) {
-    const symbol = checker.getSymbolAtLocation(identifier);
-    return (symbol?.declarations ?? []).some(declaration => {
-      if (ts.isParameter(declaration) || ts.isFunctionDeclaration(declaration) ||
-          ts.isImportSpecifier(declaration) || ts.isImportClause(declaration)) return true;
+  function locallyBoundRequire(identifier) {
+    const binding = checker.getSymbolAtLocation(identifier);
+    return (binding?.declarations ?? []).some(declaration => {
+      if (ts.isParameter(declaration) || ts.isImportSpecifier(declaration) ||
+          ts.isImportClause(declaration) || ts.isImportEqualsDeclaration(declaration)) return true;
+      if (ts.isFunctionDeclaration(declaration)) return Boolean(declaration.body);
       if (ts.isVariableDeclaration(declaration)) {
         const statement = declaration.parent?.parent;
-        const ambient = statement && (ts.getCombinedModifierFlags(statement) & ts.ModifierFlags.Ambient);
-        return !ambient;
+        return !(statement && (ts.getCombinedModifierFlags(statement) & ts.ModifierFlags.Ambient));
       }
       return false;
     });
@@ -61,8 +60,8 @@ function sourceImports(sourceFile, checker) {
         && ts.isIdentifier(expression.expression)
         && expression.expression.text === 'require'
         && expression.name.text === 'resolve';
-      const requireIdentifier = isRequire ? expression : isRequireResolve ? expression.expression : null;
-      if (isImport || ((isRequire || isRequireResolve) && !isLocallyImplementedRequire(requireIdentifier))) {
+      const requireName = isRequire ? expression : isRequireResolve ? expression.expression : null;
+      if (isImport || ((isRequire || isRequireResolve) && !locallyBoundRequire(requireName))) {
         const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
         const firstArgument = node.arguments[0];
         const specifier = firstArgument && ts.isStringLiteralLike(firstArgument) ? firstArgument.text : null;
@@ -76,9 +75,8 @@ function sourceImports(sourceFile, checker) {
 }
 
 export async function analyzeCodebase({ root = process.cwd(), config = 'tsconfig.json', impact = null } = {}) {
-  const workspaceRoot = path.resolve(root);
-  const configuration = path.resolve(workspaceRoot, config);
-  if (relativeWithin(workspaceRoot, configuration) === null) throw new Error('tsconfig must remain inside the workspace');
+  const workspaceRoot = canonicalWorkspace(root);
+  const configuration = canonicalFile(workspaceRoot, config, 'tsconfig');
   const loaded = ts.readConfigFile(configuration, ts.sys.readFile);
   if (loaded.error) throw new Error(ts.flattenDiagnosticMessageText(loaded.error.messageText, '\n'));
   const parsed = ts.parseJsonConfigFileContent(loaded.config, ts.sys, path.dirname(configuration), undefined, configuration);
@@ -86,16 +84,25 @@ export async function analyzeCodebase({ root = process.cwd(), config = 'tsconfig
   if (!parsed.fileNames.length) throw new Error('TypeScript configuration contains no source files');
   const program = ts.createProgram({ rootNames: parsed.fileNames, options: parsed.options, projectReferences: parsed.projectReferences });
   const checker = program.getTypeChecker();
-  const sourceFiles = program.getSourceFiles().filter(file => !file.isDeclarationFile && relativeWithin(workspaceRoot, file.fileName) !== null && !normalize(file.fileName).includes('/node_modules/'));
+  const sourceFiles = program.getSourceFiles().filter(file => {
+    if (file.isDeclarationFile || relativeWithin(workspaceRoot, file.fileName) === null || normalize(file.fileName).includes('/node_modules/')) return false;
+    // Reject external symlink targets rather than silently treating them as indexed project code.
+    canonicalFile(workspaceRoot, file.fileName, 'source file');
+    return true;
+  });
   const fileSet = new Set(sourceFiles.map(file => normalize(path.relative(workspaceRoot, file.fileName))));
+  // Cache repeated TypeScript resolution decisions for project-scale graph discovery.
+  const resolutionCache = ts.createModuleResolutionCache(workspaceRoot, name => ts.sys.useCaseSensitiveFileNames ? name : name.toLowerCase(), parsed.options);
   const files = sourceFiles.map(file => {
     const filename = normalize(path.relative(workspaceRoot, file.fileName));
     const edges = sourceImports(file, checker).map(item => {
       if (!item.specifier) return { ...item, kind: item.kind, status: 'dynamic-unknown', target: null };
-      const resolution = ts.resolveModuleName(item.specifier, file.fileName, parsed.options, ts.sys).resolvedModule;
+      const resolution = ts.resolveModuleName(item.specifier, file.fileName, parsed.options, ts.sys, resolutionCache).resolvedModule;
       if (!resolution) return { ...item, status: 'unresolved', target: null };
       const target = relativeWithin(workspaceRoot, resolution.resolvedFileName);
-      return { ...item, status: target && fileSet.has(target) ? 'internal' : 'external-or-unindexed', target: target && fileSet.has(target) ? target : null };
+      if (target && fileSet.has(target)) return { ...item, status: 'internal', target };
+      if (target !== null && target !== '') return { ...item, status: 'internal-unindexed', target };
+      return { ...item, status: 'external', target: null };
     });
     const symbol = checker.getSymbolAtLocation(file);
     const exports = symbol ? checker.getExportsOfModule(symbol).map(sym => sym.getName()).sort() : [];
@@ -123,10 +130,10 @@ export async function analyzeCodebase({ root = process.cwd(), config = 'tsconfig
     }
     affected = [...visited].sort();
     const dependencyPaths = {};
-    for (const candidate of affected) {
-      const route = [];
-      for (let node = candidate; node !== null; node = predecessor.get(node) ?? null) route.push(node);
-      dependencyPaths[candidate] = route.reverse();
+    for (const file of affected) {
+      const chain = [];
+      for (let cursor = file; cursor !== null; cursor = predecessor.get(cursor) ?? null) chain.push(cursor);
+      dependencyPaths[file] = chain.reverse();
     }
     impactDetails = {
       direct_dependents: [...(reverse.get(requested) ?? [])].sort(),
@@ -136,16 +143,18 @@ export async function analyzeCodebase({ root = process.cwd(), config = 'tsconfig
   const allImports = files.flatMap(file => file.imports.map(imp => ({ importer: file.path, ...imp })));
   const unresolvedCount = allImports.filter(imp => imp.status === 'unresolved').length;
   const dynamicUnknownCount = allImports.filter(imp => imp.status === 'dynamic-unknown').length;
+  const unindexedInternalCount = allImports.filter(imp => imp.status === 'internal-unindexed').length;
   return {
     schema_version: '1.0.0', operation: 'typescript_program_analysis',
-    scope: { workspace: workspaceRoot, tsconfig: normalize(path.relative(workspaceRoot, configuration)), compiler_version: ts.version, source_file_count: files.length, imports_checked: allImports.length, analysis_complete: unresolvedCount === 0 && dynamicUnknownCount === 0 },
+    scope: { workspace: workspaceRoot, tsconfig: normalize(path.relative(workspaceRoot, configuration)), compiler_version: ts.version, source_file_count: files.length, imports_checked: allImports.length, analysis_complete: unresolvedCount === 0 && dynamicUnknownCount === 0 && unindexedInternalCount === 0 && diagnostics.length === 0 },
     limitations: [
       'Dependency graph includes source files in the TypeScript program only, not every file in the repository.',
+      'Workspace-local files outside the indexed program are explicitly classified internal-unindexed, not silently assumed covered.',
       'Non-literal import() and CommonJS require()/require.resolve() paths cannot be resolved statically; their presence is reported explicitly.',
-      'CommonJS requires with locally implemented bindings are excluded; ambient/global require declarations still depend on runtime loader semantics.',
+      'Compiler bindings exclude locally shadowed require functions; ambient/global requires still depend on runtime loader behavior.',
       'Static diagnostics and dependency analysis are not proof of production behavior or safe deployment.',
     ],
-    findings: { diagnostic_count: diagnostics.length, unresolved_import_count: unresolvedCount, dynamic_unknown_count: dynamicUnknownCount },
+    findings: { diagnostic_count: diagnostics.length, unresolved_import_count: unresolvedCount, dynamic_unknown_count: dynamicUnknownCount, unindexed_internal_import_count: unindexedInternalCount },
     diagnostics, files, impact: requested === null ? null : { target: requested, affected_files: affected, ...impactDetails },
   };
 }
@@ -171,9 +180,7 @@ if (invokedFile) {
     const result = await analyzeCodebase(options);
     const json = `${JSON.stringify(result, null, 2)}\n`;
     if (options.out) {
-      const destination = path.resolve(options.root, options.out);
-      if (relativeWithin(path.resolve(options.root), destination) === null) throw new Error('Output path must stay inside workspace');
-      await mkdir(path.dirname(destination), { recursive: true });
+      const destination = await prepareWorkspaceOutput(canonicalWorkspace(options.root), options.out);
       await writeFile(destination, json);
     }
     process.stdout.write(json);
