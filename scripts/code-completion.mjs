@@ -46,6 +46,7 @@ export function completeCode({
   limit = 40, prefix = '', content, autoPrefix = false, includeDetails = false,
 } = {}) {
   const workspace = fs.realpathSync(path.resolve(root));
+  if (!fs.statSync(workspace).isDirectory()) throw new Error('workspace must be a directory');
   const configuration = localFile(workspace, config, 'tsconfig');
   const target = localFile(workspace, file, 'target file');
   if (!Number.isSafeInteger(line) || line < 1 || !Number.isSafeInteger(column) || column < 1) {
@@ -68,6 +69,12 @@ export function completeCode({
     throw new Error('target file is not included in the TypeScript project');
   }
 
+  // The file can change after path validation. Verify the canonical target again
+  // immediately before reading, and never follow a newly swapped external link.
+  const currentTarget = fs.realpathSync(target);
+  if (!within(workspace, currentTarget) || currentTarget !== target) {
+    throw new Error('target file changed or resolves outside workspace');
+  }
   const diskContent = fs.readFileSync(target, 'utf8');
   const source = content === undefined ? diskContent : content;
   const starts = [0];
