@@ -48,7 +48,7 @@ function digest(value) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
-const LOOPBACK_HOST = /^(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::[0-9]{1,5})?$/i;
+const LOOPBACK_HOST = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::[0-9]{1,5})?$/i;
 
 // An arbitrary website must not gain read/write access to a local operator
 // merely because the service is bound to loopback. Custom remote origins
