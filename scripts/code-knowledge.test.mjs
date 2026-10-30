@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -93,4 +93,21 @@ test('CLI writes inspectable JSON to new directories, returns failure for nonexi
       error => error.code === 1 && JSON.parse(error.stdout).findings.symbol_found === false,
     );
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('symbol knowledge refuses symlinked definition input and output destinations', async () => {
+  const root = await fixture({ 'main.ts': 'export const main = true;\n' });
+  const outside = await mkdtemp(path.join(os.tmpdir(), 'pro-code-knowledge-outside-'));
+  const cli = fileURLToPath(new URL('./code-knowledge.mjs', import.meta.url));
+  try {
+    await writeFile(path.join(outside, 'external.ts'), 'export const main = false;\n');
+    await symlink(path.join(outside, 'external.ts'), path.join(root, 'src', 'linked.ts'));
+    await assert.rejects(() => queryCodeKnowledge({ root, symbol: 'main', definitionFile: 'src/linked.ts' }), /outside the workspace/);
+    await rm(path.join(root, 'src', 'linked.ts'));
+    await symlink(outside, path.join(root, 'reports'));
+    await assert.rejects(promisify(execFile)(process.execPath, [
+      cli, '--root', root, '--symbol', 'main', '--out', 'reports/result.json',
+    ]), error => error.code === 1 && /Output directory/.test(error.stderr));
+    await assert.rejects(readFile(path.join(outside, 'result.json')), { code: 'ENOENT' });
+  } finally { await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); }
 });
