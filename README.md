@@ -79,6 +79,22 @@ npm run test:code-completion
 
 Positions use **1-based lines and columns**. Pass `--root` and `--config` for a different project and `--prefix` to filter suggested names. Results include insertion text, replacement spans where offered, compiler version, and flags for snippets and completion entries requiring additional import/code actions. The command rejects target files outside the workspace, symlink escapes, excluded project files, invalid positions, and unbounded output. No result may be represented as a compiled or applied patch; import code actions need a proper editor/integration before insertion.
 
+## Executable compiler-aware refactoring
+
+`code:refactor` adds actual cross-file TypeScript symbol renames to the existing completion, compiler-inspection, and symbol-knowledge tools. It uses TypeScript's rename locations, not text search; unrelated same-spelling local symbols stay untouched.
+
+```bash
+# Read-only plan, with exact source/output SHA-256 and per-file edits
+npm run code:refactor -- --file src/workers.ts --line 1 --column 1 --new-name replacementName
+
+# Apply only when explicitly requested
+npm run code:refactor -- --file src/workers.ts --line 1 --column 1 --new-name replacementName --apply
+
+npm run test:code-refactor
+```
+
+The selected cursor must point to a renameable identifier, using 1-based line/column coordinates. Preview never writes. The engine rejects files outside the configured TypeScript project or the workspace, realpath escapes, invalid identifiers, overlapping edits, change-bound overruns, and renames that introduce new compiler diagnostics. Each affected file must still match the preview's observed SHA-256 before any write; the apply step uses same-directory atomic file replacements and verifies readback hashes. A later write failure triggers best-effort rollback of already changed files. **This is not a crash-safe multi-file transaction**: interruption between writes can leave partial changes, so use Git and CI for durable rollback/recovery. The tool does not perform GitHub pushes or bypass connector consent.
+
 ## Run it
 
 ```bash
