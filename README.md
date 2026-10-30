@@ -86,7 +86,36 @@ For duplicate names from multiple modules, pass `--resolve-source <module>` to i
 
 ```
 
+```
+
+
+### Compiler-resolved completion details and diagnostics
+
+Use the opt-in TypeScript language-service details when a suggestion needs an import, and include syntax/semantic diagnostics for the target file:
+
+```bash
+npm run code:complete -- --file src/workers.ts --line 1 --column 1 --limit 25 --details --diagnostics
+```
+
+`--details` asks TypeScript for symbol information, documentation and **real compiler-proposed code actions** (including auto-import text changes, file-relative paths and exact spans). It does **not** apply those edits, install packages, or certify the result. Text changes outside the resolved workspace are not surfaced. `--diagnostics` adds compiler syntax and semantic diagnostics with error codes and 1-based locations. Both switches are optional to keep ordinary completion fast. Validate edits with the compiler, tests and repository CI before using them in production.
+
 Positions use **1-based lines and columns**. Pass `--root` and `--config` for a different project and `--prefix` to filter suggested names. Results include insertion text, replacement spans where offered, compiler version, and flags for snippets and completion entries requiring additional import/code actions. The command rejects target files outside the workspace, symlink escapes, excluded project files, invalid positions, and unbounded output. No result may be represented as a compiled or applied patch; import code actions need a proper editor/integration before insertion.
+
+## Executable compiler-aware refactoring
+
+`code:refactor` adds actual cross-file TypeScript symbol renames to the existing completion, compiler-inspection, and symbol-knowledge tools. It uses TypeScript's rename locations, not text search; unrelated same-spelling local symbols stay untouched.
+
+```bash
+# Read-only plan, with exact source/output SHA-256 and per-file edits
+npm run code:refactor -- --file src/workers.ts --line 1 --column 1 --new-name replacementName
+
+# Apply only when explicitly requested
+npm run code:refactor -- --file src/workers.ts --line 1 --column 1 --new-name replacementName --apply
+
+npm run test:code-refactor
+```
+
+The selected cursor must point to a renameable identifier, using 1-based line/column coordinates. Preview never writes. The engine rejects files outside the configured TypeScript project or the workspace, realpath escapes, invalid identifiers, overlapping edits, change-bound overruns, and renames that introduce new compiler diagnostics. Each affected file must still match the preview's observed SHA-256 before any write; the apply step uses same-directory atomic file replacements and verifies readback hashes. A later write failure triggers best-effort rollback of already changed files. **This is not a crash-safe multi-file transaction**: interruption between writes can leave partial changes, so use Git and CI for durable rollback/recovery. The tool does not perform GitHub pushes or bypass connector consent.
 
 ## Run it
 
@@ -185,6 +214,12 @@ The TypeScript worker layer and local Nexus enforce a fail-closed request shape 
 - human-review requirements;
 - external-action prohibition for the local contract;
 - explicit acknowledgement before success.
+
+### Local browser-origin boundary
+
+Nexus no longer returns wildcard `Access-Control-Allow-Origin: *`. By default it accepts browser origins only when both the browser origin and requested Host are loopback (`localhost`, `127.0.0.1`, or `[::1]`). Local development ports may differ. Foreign browser origins, opaque `null` origins and requests explicitly marked `Sec-Fetch-Site: cross-site` without an allowed origin are rejected with HTTP 403 before dispatch or context mutation.
+
+For an intentional non-loopback browser client, configure exact allowed origins using comma-separated `PRO_CODE_ALLOWED_ORIGINS` values, for example `https://operator.example`. This is **browser-origin isolation, not authentication**: direct HTTP clients without an Origin header can still make requests. Keep the service loopback-only unless a trusted authentication and network boundary is separately deployed and verified. The runtime does not trust proxy-supplied forwarding headers to infer origin.
 
 Transport credentials remain outside the serialized browser request envelope. A future authenticated deployment must supply its own trusted authorization/signature boundary and receipts.
 

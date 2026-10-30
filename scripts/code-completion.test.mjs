@@ -121,6 +121,72 @@ test('CLI accepts unsaved text from stdin and provides inferred prefix and detai
   } finally { dispose(root); }
 });
 
+test('compiler-backed completion details include a real auto-import edit proposal', () => {
+  const root = fixture({
+    'library.ts': 'export function rocketLaunch(): void {}\n',
+    'main.ts': 'rock',
+  });
+  try {
+    const initial = readFileSync(path.join(root, 'src/main.ts'), 'utf8');
+    const result = completeCode({
+      root, file: 'src/main.ts', line: 1, column: 5,
+      prefix: 'rocket', includeDetails: true,
+    });
+    const suggestion = result.entries.find(entry => entry.name === 'rocketLaunch');
+    assert.ok(suggestion, 'compiler should offer the module export');
+    assert.equal(suggestion.requires_code_action, true);
+    assert.ok(suggestion.code_actions?.length, 'auto-import must have a concrete code action');
+    const edits = suggestion.code_actions.flatMap(action => action.changes);
+    assert.ok(edits.some(edit => edit.file === 'src/main.ts'
+      && edit.edits.some(change => change.new_text.includes('import'))));
+    assert.equal(readFileSync(path.join(root, 'src/main.ts'), 'utf8'), initial, 'completion must remain read-only');
+    assert.ok(!Object.hasOwn(completeCode({
+      root, file: 'src/main.ts', line: 1, column: 5, prefix: 'rocket',
+    }).entries[0], 'code_actions'), 'expensive details are strictly opt-in');
+  } finally { dispose(root); }
+});
+
+test('optional compiler diagnostics report semantic errors with source locations', () => {
+  const root = fixture({
+    'main.ts': 'const answer: number = "wrong";\nans',
+  });
+  try {
+    const report = completeCode({
+      root, file: 'src/main.ts', line: 2, column: 4,
+      prefix: 'ans', includeDiagnostics: true,
+    });
+    const error = report.diagnostics.find(item => item.code === 2322);
+    assert.ok(error, 'TypeScript must detect incompatible assignment');
+    assert.equal(error.category, 'error');
+    assert.equal(error.line, 1);
+    assert.ok(error.column >= 1);
+    const plain = completeCode({ root, file: 'src/main.ts', line: 2, column: 4 });
+    assert.equal(Object.hasOwn(plain, 'diagnostics'), false);
+    assert.throws(() => completeCode({
+      root, file: 'src/main.ts', line: 2, column: 4, includeDetails: 'true',
+    }), /must be booleans/);
+  } finally { dispose(root); }
+});
+
+test('CLI exposes details and diagnostics without requiring an editor or writing files', async () => {
+  const root = fixture({
+    'library.ts': 'export const stellarObject = 42;\n',
+    'main.ts': 'stel',
+  });
+  const cli = fileURLToPath(new URL('./code-completion.mjs', import.meta.url));
+  try {
+    const { stdout } = await promisify(execFile)(process.execPath, [
+      cli, '--root', root, '--file', 'src/main.ts', '--line', '1',
+      '--column', '5', '--prefix', 'stellar', '--details', '--diagnostics',
+    ]);
+    const report = JSON.parse(stdout);
+    assert.ok(Array.isArray(report.diagnostics));
+    assert.ok(report.entries.some(item => item.name === 'stellarObject'
+      && item.code_actions.length > 0));
+    await assert.rejects(promisify(execFile)(process.execPath, [cli, '--wat']), /Unknown argument/);
+  } finally { dispose(root); }
+});
+
 test('resolves compiler documentation and complete auto-import edits without writing files', () => {
   const source = 'addVal';
   const root = fixture({

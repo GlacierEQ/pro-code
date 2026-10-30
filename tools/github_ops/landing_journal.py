@@ -255,6 +255,26 @@ class LandingJournal:
             self._event(db, plan_id, step_id, new_state, {"snapshot_sha256": snapshot_hash})
             return {**dict(self._get(db, plan_id, step_id)), "observation": new_state}
 
+    def reconcile_native(self, plan_id: str, step_id: str, reader=None) -> dict:
+        """GET-only GitHub readback; consented writes remain the host's responsibility.
+
+        Unknown provider results preserve the current state rather than
+        triggering a blind retry or treating an inaccessible PR as unmerged.
+        """
+        with self._read() as db:
+            row = dict(self._get(db, plan_id, step_id))
+        if row["state"] == "DECLINED":
+            return {**row, "observation": "DECLINED_NOT_RETRIED"}
+        from .native_readback import GitHubReadback, NativeReadbackUnavailable
+
+        try:
+            native = reader if reader is not None else GitHubReadback()
+            snapshot = native.snapshot(json.loads(row["intent_json"]))
+        except (NativeReadbackUnavailable, KeyError, ValueError, TypeError, OSError) as exc:
+            return {**row, "observation": "NATIVE_READBACK_UNAVAILABLE",
+                    "reason": str(exc)[:240]}
+        return self.reconcile(plan_id, step_id, snapshot)
+
     def status(self, plan_id: str | None = None) -> dict:
         with self._read() as db:
             if plan_id is None:
@@ -273,7 +293,7 @@ class LandingJournal:
 def main() -> None:
     p = argparse.ArgumentParser(description="Readback-backed journal only; never invokes GitHub writes")
     p.add_argument("--db", required=True, help="Persistent SQLite journal path")
-    p.add_argument("action", choices=("plan", "arm", "attempt", "uncertain", "decline", "reconcile", "status", "history"))
+    p.add_argument("action", choices=("plan", "arm", "attempt", "uncertain", "decline", "reconcile", "native-reconcile", "status", "history"))
     p.add_argument("--plan", dest="plan_id")
     p.add_argument("--step", dest="step_id")
     p.add_argument("--file", help="Path to intent or native readback JSON")
@@ -291,6 +311,8 @@ def main() -> None:
                 p.error("--file JSON path required")
             data = json.loads(Path(a.file).read_text(encoding="utf-8"))
             result = journal.plan(a.plan_id, a.step_id, data) if a.action == "plan" else journal.reconcile(a.plan_id, a.step_id, data)
+        elif a.action == "native-reconcile":
+            result = journal.reconcile_native(a.plan_id, a.step_id)
         elif a.action == "arm":
             result = journal.arm(a.plan_id, a.step_id)
         elif a.action == "attempt":
