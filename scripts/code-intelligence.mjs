@@ -72,14 +72,21 @@ export async function analyzeCodebase({ root = process.cwd(), config = 'tsconfig
   const checker = program.getTypeChecker();
   const sourceFiles = program.getSourceFiles().filter(file => !file.isDeclarationFile && relativeWithin(workspaceRoot, file.fileName) !== null && !normalize(file.fileName).includes('/node_modules/'));
   const fileSet = new Set(sourceFiles.map(file => normalize(path.relative(workspaceRoot, file.fileName))));
+  // Reuse TypeScript's module resolution cache across the entire dependency graph.
+  // Repeated package and directory lookups otherwise multiply filesystem I/O.
+  const resolutionCache = ts.createModuleResolutionCache(workspaceRoot, name => ts.sys.useCaseSensitiveFileNames ? name : name.toLowerCase(), parsed.options);
   const files = sourceFiles.map(file => {
     const filename = normalize(path.relative(workspaceRoot, file.fileName));
     const edges = sourceImports(file).map(item => {
       if (!item.specifier) return { ...item, kind: item.kind, status: 'dynamic-unknown', target: null };
-      const resolution = ts.resolveModuleName(item.specifier, file.fileName, parsed.options, ts.sys).resolvedModule;
+      const resolution = ts.resolveModuleName(item.specifier, file.fileName, parsed.options, ts.sys, resolutionCache).resolvedModule;
       if (!resolution) return { ...item, status: 'unresolved', target: null };
       const target = relativeWithin(workspaceRoot, resolution.resolvedFileName);
-      return { ...item, status: target && fileSet.has(target) ? 'internal' : 'external-or-unindexed', target: target && fileSet.has(target) ? target : null };
+      if (target && fileSet.has(target)) return { ...item, status: 'internal', target };
+      // A declaration/source file inside the workspace but outside the indexed
+      // program is not an external dependency and cannot be called complete.
+      if (target !== null && target !== '') return { ...item, status: 'internal-unindexed', target };
+      return { ...item, status: 'external', target: null };
     });
     const symbol = checker.getSymbolAtLocation(file);
     const exports = symbol ? checker.getExportsOfModule(symbol).map(sym => sym.getName()).sort() : [];
@@ -104,16 +111,18 @@ export async function analyzeCodebase({ root = process.cwd(), config = 'tsconfig
   const allImports = files.flatMap(file => file.imports.map(imp => ({ importer: file.path, ...imp })));
   const unresolvedCount = allImports.filter(imp => imp.status === 'unresolved').length;
   const dynamicUnknownCount = allImports.filter(imp => imp.status === 'dynamic-unknown').length;
+  const unindexedInternalCount = allImports.filter(imp => imp.status === 'internal-unindexed').length;
   return {
     schema_version: '1.0.0', operation: 'typescript_program_analysis',
-    scope: { workspace: workspaceRoot, tsconfig: normalize(path.relative(workspaceRoot, configuration)), compiler_version: ts.version, source_file_count: files.length, imports_checked: allImports.length, analysis_complete: unresolvedCount === 0 && dynamicUnknownCount === 0 },
+    scope: { workspace: workspaceRoot, tsconfig: normalize(path.relative(workspaceRoot, configuration)), compiler_version: ts.version, source_file_count: files.length, imports_checked: allImports.length, analysis_complete: unresolvedCount === 0 && dynamicUnknownCount === 0 && unindexedInternalCount === 0 && diagnostics.length === 0 },
     limitations: [
       'Dependency graph includes source files in the TypeScript program only, not every file in the repository.',
+      'Resolved local declarations outside the indexed graph are explicitly marked internal-unindexed; impact results cannot claim coverage of their references.',
       'Non-literal import() and CommonJS require()/require.resolve() paths cannot be resolved statically; their presence is reported explicitly.',
       'CommonJS require-call detection is syntax-based and does not establish whether a locally shadowed require is the Node.js loader.',
       'Static diagnostics and dependency analysis are not proof of production behavior or safe deployment.',
     ],
-    findings: { diagnostic_count: diagnostics.length, unresolved_import_count: unresolvedCount, dynamic_unknown_count: dynamicUnknownCount },
+    findings: { diagnostic_count: diagnostics.length, unresolved_import_count: unresolvedCount, dynamic_unknown_count: dynamicUnknownCount, unindexed_internal_import_count: unindexedInternalCount },
     diagnostics, files, impact: requested === null ? null : { target: requested, affected_files: affected },
   };
 }
