@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from tools.github_ops.landing_journal import LandingStateError
@@ -66,7 +67,7 @@ class LandingSequenceTest(unittest.TestCase):
         self.install()
         result = self.engine.status("landing-4")
         self.assertEqual(result["next_ready"], ["first", "parallel"])
-        self.assertEqual(result["counts"], {"ready": 2, "reconcile": 0, "blocked": 2, "completed": 0, "declined": 0})
+        self.assertEqual(result["counts"], {"ready": 2, "reconcile": 0, "blocked": 2, "blocked_declined": 0, "completed": 0, "declined": 0})
         self.assertFalse(result["complete"])
 
     def test_direct_journal_arm_does_not_bypass_dependencies(self):
@@ -110,7 +111,10 @@ class LandingSequenceTest(unittest.TestCase):
         status = self.engine.status("landing-4")
         self.assertEqual(status["counts"]["declined"], 1)
         self.assertEqual(status["next_ready"], ["parallel"])
-        self.assertEqual(self.steps()["second"]["action"], "WAIT_DEPENDENCIES")
+        self.assertEqual(self.steps()["second"]["action"], "STOPPED_BY_DECLINE")
+        self.assertEqual(self.steps()["final"]["action"], "STOPPED_BY_DECLINE")
+        self.assertFalse(status["complete"])
+        self.assertFalse(status["terminal"])  # Independent parallel work remains actionable.
         self.assertEqual(self.engine.reconcile_many("landing-4", {"first": snapshot(10)})["results"]["first"]["state"], "DECLINED")
         with self.assertRaisesRegex(LandingStateError, "dependency first"):
             self.engine.arm("landing-4", "second")
@@ -150,11 +154,14 @@ class LandingSequenceTest(unittest.TestCase):
             self.engine.status("landing-4")
 
     def test_missing_and_self_dependency_rejected(self):
-        for dep in ("does-not-exist", "first"):
-            bad = sample()
-            bad["steps"][0]["depends_on"] = [dep]
-            with self.assertRaises(LandingStateError):
-                self.engine.install(bad)
+        bad = sample()
+        bad["steps"][0]["depends_on"] = ["does-not-exist"]
+        with self.assertRaisesRegex(LandingStateError, "unknown prerequisite"):
+            self.engine.install(bad)
+        bad = sample()
+        bad["steps"][0]["depends_on"] = ["first"]
+        with self.assertRaisesRegex(LandingStateError, "cycle"):
+            self.engine.install(bad)
         self.assertEqual(self.engine.journal.status("landing-4")["steps"], [])
 
     def test_unknown_snapshot_step_rejected_atomically(self):
@@ -218,14 +225,57 @@ class LandingSequenceTest(unittest.TestCase):
 
     def test_terminal_completion(self):
         self.install()
-        self.engine.reconcile_many("landing-4", {
+        # All four operations were already complete in independently obtained
+        # remote readbacks before this plan. This is not an invocation shortcut.
+        outcome = self.engine.reconcile_many("landing-4", {
             "first": snapshot(10), "second": snapshot(11, SHA2),
             "parallel": snapshot(12), "final": snapshot(13),
         })
+        self.assertTrue(all(result["state"] == "ALREADY_SATISFIED" for result in outcome["results"].values()))
         state = self.engine.status("landing-4")
         self.assertTrue(state["complete"])
+        self.assertTrue(state["terminal"])
         self.assertEqual(state["next_ready"], [])
         self.assertEqual(state["counts"]["completed"], 4)
+
+    def test_declined_terminal_is_not_success(self):
+        self.install()
+        self.engine.journal.declined("landing-4", "first")
+        self.engine.reconcile_many("landing-4", {"parallel": snapshot(12)})
+        state = self.engine.status("landing-4")
+        self.assertEqual(state["counts"]["blocked_declined"], 2)
+        self.assertTrue(state["terminal"])
+        self.assertTrue(state["stopped_by_decline"])
+        self.assertFalse(state["complete"])
+        self.assertEqual(state["next_ready"], [])
+        self.assertEqual(self.steps()["final"]["action"], "STOPPED_BY_DECLINE")
+
+    def test_batch_reconcile_rolls_back_on_second_failure(self):
+        self.install()
+        original = self.engine.journal._reconcile_in_transaction
+
+        def fail_second(db, plan_id, step_id, snapshot_data):
+            if step_id == "second":
+                raise LandingStateError("simulated provider readback failure")
+            return original(db, plan_id, step_id, snapshot_data)
+
+        with mock.patch.object(self.engine.journal, "_reconcile_in_transaction", fail_second):
+            with self.assertRaisesRegex(LandingStateError, "simulated"):
+                self.engine.reconcile_many("landing-4", {
+                    "first": snapshot(10), "second": snapshot(11, SHA2),
+                })
+        self.assertEqual(self.steps()["first"]["state"], "PLANNED")
+        self.assertEqual(self.steps()["second"]["state"], "PLANNED")
+        self.assertEqual(len(self.engine.journal.history("landing-4", "first")), 1)
+
+    def test_successful_atomic_batch_records_each_exact_state(self):
+        self.install()
+        result = self.engine.reconcile_many("landing-4", {
+            "first": snapshot(10), "second": snapshot(11, SHA2),
+        })
+        self.assertEqual(result["results"]["first"]["state"], "ALREADY_SATISFIED")
+        self.assertEqual(result["results"]["second"]["state"], "ALREADY_SATISFIED")
+        self.assertEqual(result["progress"]["next_ready"], ["parallel"])
 
 
 if __name__ == "__main__":
