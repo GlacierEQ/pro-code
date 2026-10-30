@@ -158,7 +158,7 @@ function report(manifest) {
 }
 
 export class WorkspaceAutomation {
-  constructor({ workspaceRoot = process.cwd(), outputDir, env = process.env, now = () => new Date(), hashFile = sha256 } = {}) {
+  constructor({ workspaceRoot = process.cwd(), outputDir, env = process.env, now = () => new Date(), hashFile = sha256, statFile = stat } = {}) {
     this.workspaceRoot = path.resolve(workspaceRoot);
     this.outputDir = path.resolve(outputDir ?? env.PRO_CODE_RUNTIME_DIR ?? path.join(this.workspaceRoot, '.pro-code', 'runtime'));
     this.manifestPath = path.join(this.outputDir, 'workspace-manifest.json');
@@ -169,6 +169,8 @@ export class WorkspaceAutomation {
     this.maxFiles = positiveInteger(env.PRO_CODE_MAX_FILES, 25_000, 1, 1_000_000);
     this.maxHashBytes = positiveInteger(env.PRO_CODE_MAX_HASH_BYTES, 268_435_456, 1, 10_737_418_240);
     this.hashConcurrency = positiveInteger(env.PRO_CODE_HASH_CONCURRENCY, 4, 1, 16);
+    this.statConcurrency = positiveInteger(env.PRO_CODE_STAT_CONCURRENCY, 16, 1, 64);
+    this.statFile = statFile;
     this.hashFile = hashFile;
     this.now = now;
     this.timer = null;
@@ -314,6 +316,7 @@ export class WorkspaceAutomation {
   async scanFiles() {
     const files = [];
     const toHash = [];
+    const statTargets = [];
     const pending = [this.workspaceRoot];
     while (pending.length) {
       const directory = pending.pop();
@@ -334,30 +337,53 @@ export class WorkspaceAutomation {
           continue;
         }
         if (!entry.isFile()) continue;
-        if (files.length >= this.maxFiles) {
+        if (statTargets.length >= this.maxFiles) {
           throw new Error(`Workspace scan incomplete: exceeded PRO_CODE_MAX_FILES (${this.maxFiles}); raise the limit to inventory the full workspace`);
         }
-        let metadata;
-        try {
-          metadata = await stat(absolutePath);
-        } catch (error) {
-          throw new Error(`Workspace scan incomplete: could not stat ${absolutePath}: ${error instanceof Error ? error.message : String(error)}`);
-        }
-        const relativePath = path.relative(this.workspaceRoot, absolutePath).split(path.sep).join('/');
-        const category = classify(relativePath);
-        const record = {
-          path: relativePath,
-          category,
-          size: metadata.size,
-          modified_at: metadata.mtime.toISOString(),
-          sha256: null,
-          hash_status: metadata.size > this.maxHashBytes ? 'skipped_size_limit' : 'pending',
-          evidence: rank(relativePath, category),
-        };
-        files.push(record);
-        if (record.hash_status === 'pending') toHash.push({ absolutePath, metadata, record });
+        statTargets.push({
+          absolutePath,
+          relativePath: path.relative(this.workspaceRoot, absolutePath).split(path.sep).join('/'),
+        });
       }
     }
+
+    // Walk the tree first, then overlap independent metadata reads within a
+    // fixed worker pool. The indexed slots preserve deterministic input order;
+    // all metadata errors are observed before publishing a manifest.
+    const records = new Array(statTargets.length);
+    const hashTasks = new Array(statTargets.length);
+    let statCursor = 0;
+    let statFailure = null;
+    async function statWorker(scan) {
+      while (statCursor < statTargets.length) {
+        const index = statCursor++;
+        const { absolutePath, relativePath } = statTargets[index];
+        try {
+          const metadata = await scan.statFile(absolutePath);
+          const category = classify(relativePath);
+          const record = {
+            path: relativePath,
+            category,
+            size: metadata.size,
+            modified_at: metadata.mtime.toISOString(),
+            sha256: null,
+            hash_status: metadata.size > scan.maxHashBytes ? 'skipped_size_limit' : 'pending',
+            evidence: rank(relativePath, category),
+          };
+          records[index] = record;
+          if (record.hash_status === 'pending') hashTasks[index] = { absolutePath, metadata, record };
+        } catch (error) {
+          statFailure ??= new Error(`Workspace scan incomplete: could not stat ${absolutePath}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    }
+    await Promise.all(Array.from(
+      { length: Math.min(this.statConcurrency, statTargets.length) },
+      () => statWorker(this),
+    ));
+    if (statFailure) throw statFailure;
+    files.push(...records);
+    toHash.push(...hashTasks.filter(Boolean));
 
     // Bounded file I/O overlaps independent hashes, without unbounded open streams.
     // Every eligible file is still fully hashed on every scan (no metadata-only cache).
