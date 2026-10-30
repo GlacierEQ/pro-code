@@ -85,3 +85,69 @@ The operator's refusal to close `GlacierEQ/spacex-mission-control#3` is binding;
 ## Verified read-only estate demonstration
 
 The included `evidence/live-github-readback-2026-10-29.json` records source links and exact public GitHub PR metadata fetched through the connected GitHub app. From the package root run `python -m evidence.live_readback_demo`. Both merged PRs classify as `ALREADY_SATISFIED`, **not** as an action performed by this runner. At the checked main revisions, mission-control's `machine/capabilities.json` has 13 entries and telemetry's has 19. Their capability count does not establish a SpaceX flight-system deployment.
+
+## Multi-step landing sequences (new executable capability)
+
+The single-step journal remains unchanged for existing callers. The additive
+`tools/github_ops/landing_sequence.py` coordinates a **whole dependency graph**
+of consented GitHub operations. It atomically installs up to 200 bounded,
+immutable steps, resumes after session death, and reports which independent
+work may proceed while an unrelated step is awaiting readback.
+
+A sequence is not another approval system. It is an executable continuation map
+for the original detached launcher: it prevents the caller from accidentally
+repeating an unknown write, invoking a dependent step before its provider outcome
+is confirmed, or treating a declined card as permission to continue.
+
+### Run the sequence engine
+
+From the repository root:
+
+```sh
+# Construct a manifest from the actual intended repository operations.
+python -m tools.github_ops.landing_sequence --db "$STATE_DB" install --file landing-plan.json
+
+# Read the current executable work frontier; no GitHub write is performed.
+python -m tools.github_ops.landing_sequence --db "$STATE_DB" status --plan my-landing
+
+# Before presenting the normal native connector consent card for a READY step:
+python -m tools.github_ops.landing_sequence --db "$STATE_DB" arm --plan my-landing --step branch
+
+# After a real native connector invocation, use the existing journal to record
+# its invocation ID (never invent one). Unknown outcomes require readback first.
+python -m tools.github_ops.landing_journal --db "$STATE_DB" attempt --plan my-landing --step branch --invocation PROVIDER_INVOCATION_ID
+
+# Normalize independent native GitHub GET/readback data into JSON mapping
+# step ID to its repository/target/observed fields; reconcile only, no mutation.
+python -m tools.github_ops.landing_sequence --db "$STATE_DB" reconcile --plan my-landing --file native-readbacks.json
+```
+
+The JSON manifest uses `schema: glaciereq.github-landing-sequence.v1`,
+`plan_id`, and `steps: [{id, depends_on, intent}]`. Each `intent` has
+the original journal's exact fields `operation`, `repository`, `target`,
+`expected`, and (for PR merge/close) `expected_head_sha`. Dependencies
+are step IDs; cycles, unknown dependencies, duplicate identifiers, malformed
+SHAs and credential fields are rejected before creating any step. A plan ID
+cannot be silently repurposed to change its contents.
+
+Status actions:
+- `READY_TO_ARM`: dependencies have verified provider readbacks; invoke
+  `arm` before the original host initiates its consented connector write.
+- `RECONCILE_REMOTE_FIRST`: already armed, attempted or unresolved. Never
+  blindly reissue the write after lost foreground state.
+- `WAIT_DEPENDENCIES`: another step is not confirmed yet. Other independent
+  ready steps are still surfaced.
+- `DECLINED_STOP`: consent was denied; do not resubmit without a fresh
+  user directive.
+- `COMPLETE`: native expected state matched. Complete refers to this step,
+  not a claim that a whole business/deployment objective is finished.
+
+Each GitHub write remains with the existing host and provider consent mechanism.
+The sequence engine does not call GitHub, mint tokens, trigger approvals,
+create a background daemon, or modify the original workstation `ghl.py`.
+Its on-disk SQLite journal is scoped to the host holding it; do not claim
+multi-host exactly-once guarantees.
+
+Verification: `python -m unittest tests.test_landing_sequence -v`
+covers dependency ordering, independent progress, process recovery, declines,
+concurrent arm races, malformed plans, and complete four-step sequences.
