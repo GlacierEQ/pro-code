@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, symlinkSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -76,6 +76,50 @@ test('CLI emits JSON and fails on missing required position', async () => {
   } finally { dispose(root); }
 });
 
+test('transient editor buffer overrides disk without changing the source file', () => {
+  const original = "interface Profile { oldField: string }\ndeclare const p: Profile;\np.old";
+  const unsaved = "/** Description from the unsaved buffer. */\ninterface Profile { newField: string; newNumber: number }\ndeclare const p: Profile;\np.new";
+  const root = fixture({ 'main.ts': original });
+  try {
+    const result = completeCode({ root, file: 'src/main.ts', line: 4, column: 6, content: unsaved, autoPrefix: true, includeDetails: true });
+    assert.equal(result.source_kind, 'editor-buffer');
+    assert.equal(result.is_dirty, true);
+    assert.equal(result.prefix_used, 'new');
+    assert.deepEqual(result.entries.map(entry => entry.name).sort(), ['newField', 'newNumber']);
+    assert.ok(result.entries.every(entry => typeof entry.display_text === 'string' && Array.isArray(entry.code_actions)));
+    assert.equal(readFileSync(path.join(root, 'src/main.ts'), 'utf8'), original);
+    assert.deepEqual(completeCode({ root, file: 'src/main.ts', line: 3, column: 6, prefix: 'old' }).entries.map(entry => entry.name), ['oldField']);
+  } finally { dispose(root); }
+});
+
+test('rejects oversized and malformed editor-buffer content', () => {
+  const root = fixture({ 'main.ts': 'const a = 1;\na' });
+  try {
+    const args = { root, file: 'src/main.ts', line: 2, column: 2 };
+    assert.throws(() => completeCode({ ...args, content: 42 }), /content must/);
+    assert.throws(() => completeCode({ ...args, content: 'x'.repeat(2_097_153) }), /at most 2 MiB/);
+    assert.throws(() => completeCode({ ...args, autoPrefix: 'yes' }), /must be booleans/);
+  } finally { dispose(root); }
+});
+
+test('CLI accepts unsaved text from stdin and provides inferred prefix and detailed symbols', () => {
+  const root = fixture({ 'main.ts': "interface Item { persisted: string }\ndeclare const item: Item;\nitem.per" });
+  const cli = fileURLToPath(new URL('./code-completion.mjs', import.meta.url));
+  const unsaved = "interface Item { current: string }\ndeclare const item: Item;\nitem.cur";
+  try {
+    const result = spawnSync(process.execPath, [
+      cli, '--root', root, '--file', 'src/main.ts', '--line', '3', '--column', '9',
+      '--content-stdin', '--auto-prefix', '--details',
+    ], { input: unsaved, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.deepEqual(report.entries.map(entry => entry.name), ['current']);
+    assert.equal(report.prefix_used, 'cur');
+    assert.equal(report.source_kind, 'editor-buffer');
+    assert.ok(report.entries[0].display_text.includes('current'));
+  } finally { dispose(root); }
+});
+
 test('compiler-backed completion details include a real auto-import edit proposal', () => {
   const root = fixture({
     'library.ts': 'export function rocketLaunch(): void {}\n',
@@ -90,14 +134,14 @@ test('compiler-backed completion details include a real auto-import edit proposa
     const suggestion = result.entries.find(entry => entry.name === 'rocketLaunch');
     assert.ok(suggestion, 'compiler should offer the module export');
     assert.equal(suggestion.requires_code_action, true);
-    assert.ok(suggestion.details?.code_actions?.length, 'auto-import must have a concrete code action');
-    const edits = suggestion.details.code_actions.flatMap(action => action.changes);
+    assert.ok(suggestion.code_actions?.length, 'auto-import must have a concrete code action');
+    const edits = suggestion.code_actions.flatMap(action => action.changes);
     assert.ok(edits.some(edit => edit.file === 'src/main.ts'
-      && edit.text_changes.some(change => change.new_text.includes('import'))));
+      && edit.edits.some(change => change.new_text.includes('import'))));
     assert.equal(readFileSync(path.join(root, 'src/main.ts'), 'utf8'), initial, 'completion must remain read-only');
     assert.ok(!Object.hasOwn(completeCode({
       root, file: 'src/main.ts', line: 1, column: 5, prefix: 'rocket',
-    }).entries[0], 'details'), 'expensive details are strictly opt-in');
+    }).entries[0], 'code_actions'), 'expensive details are strictly opt-in');
   } finally { dispose(root); }
 });
 
@@ -137,7 +181,7 @@ test('CLI exposes details and diagnostics without requiring an editor or writing
     const report = JSON.parse(stdout);
     assert.ok(Array.isArray(report.diagnostics));
     assert.ok(report.entries.some(item => item.name === 'stellarObject'
-      && item.details.code_actions.length > 0));
+      && item.code_actions.length > 0));
     await assert.rejects(promisify(execFile)(process.execPath, [cli, '--wat']), /Unknown argument/);
   } finally { dispose(root); }
 });
