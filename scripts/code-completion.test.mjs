@@ -80,7 +80,7 @@ test('CLI emits JSON and fails on missing required position', async () => {
 test('resolves compiler documentation and complete auto-import edits without writing files', () => {
   const source = 'addVal';
   const root = fixture({
-    'helpers.ts': '/** Adds two values together. */\\nexport function addValues(a: number, b: number) { return a + b; }\\n',
+    'helpers.ts': '/** Adds two values together. */\nexport function addValues(a: number, b: number) { return a + b; }\n',
     'main.ts': source,
   });
   try {
@@ -135,7 +135,7 @@ test('rejects absent and ambiguous completion resolution, and malformed source s
 });
 
 test('CLI resolves a selected suggestion and rejects nonexistent resolution names', async () => {
-  const root = fixture({ 'main.ts': 'const alpha = 1;\\nal' });
+  const root = fixture({ 'main.ts': 'const alpha = 1;\nal' });
   const cli = fileURLToPath(new URL('./code-completion.mjs', import.meta.url));
   try {
     const args = [cli, '--root', root, '--file', 'src/main.ts', '--line', '2', '--column', '3'];
