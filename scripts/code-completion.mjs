@@ -126,7 +126,7 @@ export function completeCode({ root = process.cwd(), config = 'tsconfig.json', f
         return {
           code: d.code,
           category: ts.DiagnosticCategory[d.category].toLowerCase(),
-          message: ts.flattenDiagnosticMessageText(d.messageText, '\\n'),
+          message: ts.flattenDiagnosticMessageText(d.messageText, '\n'),
           line: where ? where.line + 1 : null,
           column: where ? where.character + 1 : null,
         };
