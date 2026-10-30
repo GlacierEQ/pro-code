@@ -23,6 +23,8 @@ export function commitGuardedFiles({ root, files, beforeWrite } = {}) {
   const workspace = fs.realpathSync(root);
   const control = path.join(workspace, '.pro-code');
   fs.mkdirSync(control, { recursive: true });
+  const controlInfo = fs.lstatSync(control);
+  if (controlInfo.isSymbolicLink() || !controlInfo.isDirectory()) throw new Error('refactor control directory must be a real workspace directory');
   const lockPath = path.join(control, 'semantic-refactor.lock');
   const lockFd = fs.openSync(lockPath, 'wx', 0o600);
   const staged = [];
