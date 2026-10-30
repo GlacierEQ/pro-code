@@ -137,10 +137,19 @@ Status actions:
   blindly reissue the write after lost foreground state.
 - `WAIT_DEPENDENCIES`: another step is not confirmed yet. Other independent
   ready steps are still surfaced.
+- `STOPPED_BY_DECLINE`: direct or transitive prerequisite refused. This is
+  terminally blocked, not a slow job to poll or blindly retry.
 - `DECLINED_STOP`: consent was denied; do not resubmit without a fresh
   user directive.
 - `COMPLETE`: native expected state matched. Complete refers to this step,
   not a claim that a whole business/deployment objective is finished.
+
+Status reports both `complete` (every expected remote outcome observed)
+and `terminal` (no further step can execute). A declined chain can be terminal
+without being complete; that must never be called a successful landing.
+Multi-step readback reconciliation is all-or-nothing: any error rolls back the
+batch. Independent readback of pre-existing outcomes may mark steps
+`ALREADY_SATISFIED`; that does not claim this runner invoked those writes.
 
 Each GitHub write remains with the existing host and provider consent mechanism.
 The sequence engine does not call GitHub, mint tokens, trigger approvals,
