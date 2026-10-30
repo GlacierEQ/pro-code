@@ -74,10 +74,11 @@ The `code:complete` CLI uses the actual TypeScript language service and the proj
 ```bash
 npm ci
 npm run code:complete -- --file src/workers.ts --line 1 --column 1 --limit 25
+npm run code:complete -- --file src/workers.ts --line 1 --column 1 --prefix work --details --diagnostics
 npm run test:code-completion
 ```
 
-Positions use **1-based lines and columns**. Pass `--root` and `--config` for a different project and `--prefix` to filter suggested names. Results include insertion text, replacement spans where offered, compiler version, and flags for snippets and completion entries requiring additional import/code actions. The command rejects target files outside the workspace, symlink escapes, excluded project files, invalid positions, and unbounded output. No result may be represented as a compiled or applied patch; import code actions need a proper editor/integration before insertion.
+Positions use **1-based lines and columns**. Pass `--root` and `--config` for a different project and `--prefix` to filter suggested names. Results include insertion text, replacement spans where offered, compiler version, and flags for snippets and completion entries requiring additional import/code actions. With `--details`, the compiler resolves signatures, JSDoc, tags and exact import/code-action text edits for the bounded suggestion page; edit spans are offsets into the current source, with workspace-scope flags for every changed file. These are **read-only edit plans**, not applied patches: editor integrations must verify the source revision and apply a complete action atomically. With `--diagnostics`, the same command reports actual syntactic and semantic TypeScript diagnostics for the target file; `--fail-on-diagnostics` emits the JSON report and exits nonzero if errors or other diagnostics are present. Both analysis modes are opt-in to keep default completions fast. The command rejects target files outside the workspace, symlink escapes, excluded project files, invalid positions, and unbounded output. No result may be represented as a compiled or applied patch.
 
 ## Run it
 
