@@ -142,7 +142,7 @@ export function completeCode({ root = process.cwd(), config = 'tsconfig.json', f
         file: diagnostic.file ? relativeEditFile(diagnostic.file.fileName) : null,
         line: location ? location.line + 1 : null,
         column: location ? location.character + 1 : null,
-        message: ts.flattenDiagnosticMessageText(diagnostic.messageText, '\\n'),
+        message: ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'),
       };
     });
     return {
