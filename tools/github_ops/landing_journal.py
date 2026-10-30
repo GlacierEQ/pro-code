@@ -178,6 +178,27 @@ class LandingJournal:
             row = self._get(db, plan_id, step_id)
             if row["state"] != "PLANNED":
                 raise LandingStateError(f"no retry: step is {row['state']}; reconcile with remote first")
+            # If the plan belongs to a multi-step sequence, enforce dependencies
+            # inside this same write transaction. Calling journal.arm directly
+            # must not bypass the sequence's order or verification requirements.
+            has_sequences = db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='landing_sequences'"
+            ).fetchone()
+            if has_sequences:
+                sequence = db.execute(
+                    "SELECT manifest_json FROM landing_sequences WHERE plan_id=?", (plan_id,)
+                ).fetchone()
+                if sequence:
+                    steps = json.loads(sequence["manifest_json"])["steps"]
+                    config = next((item for item in steps if item["id"] == step_id), None)
+                    if config is None:
+                        raise LandingStateError("step not present in immutable sequence")
+                    for dependency in config["depends_on"]:
+                        previous = self._get(db, plan_id, dependency)
+                        if previous["state"] not in {"VERIFIED", "ALREADY_SATISFIED"}:
+                            raise LandingStateError(
+                                f"dependency {dependency} not verified; no connector call authorized"
+                            )
             db.execute(
                 "UPDATE steps SET state='ARMED',changed_at=? WHERE plan_id=? AND step_id=?",
                 (timestamp(), plan_id, step_id),
@@ -228,32 +249,36 @@ class LandingJournal:
             return dict(self._get(db, plan_id, step_id))
 
     def reconcile(self, plan_id: str, step_id: str, snapshot: dict) -> dict:
-        """Reconcile an independent native readback; never dispatch/retry a write."""
+        """Reconcile independent readback without submitting or retrying writes."""
         with self._connect() as db:
-            row = self._get(db, plan_id, step_id)
-            if row["state"] == "DECLINED":
-                return {**dict(row), "observation": "DECLINED_NOT_RETRIED"}
-            intent = json.loads(row["intent_json"])
-            if not isinstance(snapshot, dict) or not matching(
-                {"repository": intent["repository"], "target": intent["target"]}, snapshot
-            ):
-                return {**dict(row), "observation": "TARGET_MISMATCH_OR_UNVERIFIED"}
-            observed = snapshot.get("observed")
-            if not matching(intent["expected"], observed):
-                return {**dict(row), "observation": "OUTCOME_NOT_OBSERVED"}
-            if row["state"] in {"VERIFIED", "ALREADY_SATISFIED"}:
-                return {**dict(row), "observation": row["state"]}
-            new_state = "ALREADY_SATISFIED" if row["state"] in {"PLANNED", "ARMED"} else "VERIFIED"
-            snapshot_hash = fingerprint({
-                "repository": snapshot["repository"], "target": snapshot["target"],
-                "observed": {key: observed[key] for key in intent["expected"]},
-            })
-            db.execute(
-                "UPDATE steps SET state=?,latest_snapshot_sha256=?,changed_at=? WHERE plan_id=? AND step_id=?",
-                (new_state, snapshot_hash, timestamp(), plan_id, step_id),
-            )
-            self._event(db, plan_id, step_id, new_state, {"snapshot_sha256": snapshot_hash})
-            return {**dict(self._get(db, plan_id, step_id)), "observation": new_state}
+            return self._reconcile_in_transaction(db, plan_id, step_id, snapshot)
+
+    def _reconcile_in_transaction(self, db, plan_id: str, step_id: str, snapshot: dict) -> dict:
+        """Internal transaction primitive for all-or-nothing sequence readbacks."""
+        row = self._get(db, plan_id, step_id)
+        if row["state"] == "DECLINED":
+            return {**dict(row), "observation": "DECLINED_NOT_RETRIED"}
+        intent = json.loads(row["intent_json"])
+        if not isinstance(snapshot, dict) or not matching(
+            {"repository": intent["repository"], "target": intent["target"]}, snapshot
+        ):
+            return {**dict(row), "observation": "TARGET_MISMATCH_OR_UNVERIFIED"}
+        observed = snapshot.get("observed")
+        if not matching(intent["expected"], observed):
+            return {**dict(row), "observation": "OUTCOME_NOT_OBSERVED"}
+        if row["state"] in {"VERIFIED", "ALREADY_SATISFIED"}:
+            return {**dict(row), "observation": row["state"]}
+        new_state = "ALREADY_SATISFIED" if row["state"] in {"PLANNED", "ARMED"} else "VERIFIED"
+        snapshot_hash = fingerprint({
+            "repository": snapshot["repository"], "target": snapshot["target"],
+            "observed": {key: observed[key] for key in intent["expected"]},
+        })
+        db.execute(
+            "UPDATE steps SET state=?,latest_snapshot_sha256=?,changed_at=? WHERE plan_id=? AND step_id=?",
+            (new_state, snapshot_hash, timestamp(), plan_id, step_id),
+        )
+        self._event(db, plan_id, step_id, new_state, {"snapshot_sha256": snapshot_hash})
+        return {**dict(self._get(db, plan_id, step_id)), "observation": new_state}
 
     def reconcile_native(self, plan_id: str, step_id: str, reader=None) -> dict:
         """GET-only GitHub readback; consented writes remain the host's responsibility.
@@ -274,6 +299,7 @@ class LandingJournal:
             return {**row, "observation": "NATIVE_READBACK_UNAVAILABLE",
                     "reason": str(exc)[:240]}
         return self.reconcile(plan_id, step_id, snapshot)
+
 
     def status(self, plan_id: str | None = None) -> dict:
         with self._read() as db:
