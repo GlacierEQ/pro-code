@@ -266,7 +266,11 @@ class LandingSequence:
                 unavailable[step_id] = str(error)[:240]
         reconciled = self.reconcile_many(plan_id, snapshots)
         return {
-            "readbacks_confirmed": list(snapshots),
+            "readbacks_received": list(snapshots),
+            "outcomes_confirmed": [
+                step_id for step_id, result in reconciled["results"].items()
+                if result["observation"] in CONFIRMED
+            ],
             "readbacks_unavailable": unavailable,
             "results": reconciled["results"],
             "progress": reconciled["progress"],
