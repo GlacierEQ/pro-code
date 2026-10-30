@@ -98,3 +98,12 @@ test('prewrite mutation is detected and earlier commit rolled back',()=>{
   assert.equal(fs.readFileSync(path.join(root,'src/b.ts'),'utf8'),'racing edit');
  }finally{clean(root);}
 });
+test('refuses symlinked control directory rather than writing lock outside workspace',()=>{
+ const root=fixture(),outside=fs.mkdtempSync(path.join(os.tmpdir(),'outside-refactor-control-'));
+ try{
+  fs.symlinkSync(outside,path.join(root,'.pro-code'));
+  assert.throws(()=>commitGuardedFiles({root,files:plan()}),/real workspace directory/);
+  assert.deepEqual(fs.readdirSync(outside),[]);
+  assert.equal(fs.readFileSync(path.join(root,'src/a.ts'),'utf8'),'alpha');
+ }finally{clean(root);clean(outside);}
+});
