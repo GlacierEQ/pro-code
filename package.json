@@ -26,7 +26,7 @@
     "test:code-refactor": "node --test scripts/code-refactor.test.mjs scripts/refactor-transaction.test.mjs"
   },
   "dependencies": {
-    "react": "^19.2.6",
+    "react": "^19.3.1",
     "react-dom": "^19.2.6"
   },
   "devDependencies": {
