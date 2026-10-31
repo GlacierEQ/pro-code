@@ -1,4 +1,6 @@
-## Duality family-head bootstrap (2026-10-30)
+## Duality family-head bootstrap (2026-10-30)**Parallel ChatGPT coding delegates:** follow the [canonical private Double Helix coding intelligence contract](https://github.com/GlacierEQ/Pro_Code/blob/main/DUALITY.md#multi-chatgpt-coding-intelligence) when connected and permitted. If inaccessible, continue against this repo's actual source/tests and current Operator objective; do not infer private content or wait on optional documents.
+
+
 
 For engineering-family tasks, start with the [public Duality executable entry](DUALITY.md) and, when connected and authorized, the [private family head](https://github.com/GlacierEQ/Pro_Code/blob/main/DUALITY.md). Recover the existing Operator direction and latest runtime source/tests before any mutation. Preserve native logic, execution, audits, and history.
 
