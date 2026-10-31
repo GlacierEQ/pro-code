@@ -12,6 +12,26 @@
 
 Built by [Casey Barton](https://casey-barton-glaciereq.vercel.app), forward-deployed AI engineer · [LinkedIn](https://www.linkedin.com/in/caseybartonai) · part of the [Job-App Helix](https://github.com/GlacierEQ/job-app-helix) portfolio.
 
+## Quick execution and family routing
+
+**This repository is the public executable strand**, paired with the private [`Pro_Code` engineering doctrine](https://github.com/GlacierEQ/Pro_Code/blob/main/DUALITY.md). Open [DUALITY.md](DUALITY.md) to recover the whole relevant engineering mission; if the private source is inaccessible, use the public runtime without inventing private context.
+
+```bash
+npm ci
+npm run lint && npm run typecheck
+npm test
+npm run build
+npm run code:complete -- --help
+npm run code:knowledge -- --help
+npm run code:refactor -- --help
+```
+
+Core source routes: [package.json](package.json) · [Node runtime](server/nexus.mjs) · [code intelligence](scripts/code-intelligence.mjs) · [completion](scripts/code-completion.mjs) · [refactoring](scripts/code-refactor.mjs) · [architecture](ARCHITECTURE.md) · [CI](https://github.com/GlacierEQ/pro-code/actions).
+
+**What is implemented:** compiler-backed coding CLI scripts, a bounded local Nexus runtime and workspace inventory, a React/TypeScript interface, and native tests in Node, Python, Rust and Haskell. **What is not implied:** a connected remote AI, live execution of every advertised worker role, production deployment or automatic cross-repository inheritance. The runtime explicitly distinguishes declared capabilities from supported handlers.
+
+Recent CI checks have succeeded on `main`, but each new commit needs its own verification. See the live checks above; [DUALITY](DUALITY.md) is an entrypoint, not a substitute for a passing end-to-end test.
+
 ## What this proves
 
 - **Bounded local dispatch, enforced in code.** The Nexus runtime ([`server/nexus.mjs`](server/nexus.mjs)) validates worker ownership, case/trace/task/idempotency identity, bounded constraints, and explicit acknowledgement before it reports success. Anything else fails closed.
