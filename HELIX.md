@@ -30,3 +30,7 @@ python tools/helix_verify.py \
   --expected-repo GlacierEQ/pro-code \
   --expected-role runtime_strand
 ```
+
+## Whole-family entrypoint
+
+[**Executable DUALITY**](DUALITY.md) links this source-owning runtime to its [private doctrine family head](https://github.com/GlacierEQ/Pro_Code/blob/main/DUALITY.md), when authorized. This keeps the existing compiler, worker, CI and product implementation in their actual owner rather than turning the helix metaphor into a substitute for execution.
