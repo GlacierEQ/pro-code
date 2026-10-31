@@ -1,3 +1,9 @@
+## Duality family-head bootstrap (2026-10-30)
+
+For engineering-family tasks, start with the [public Duality executable entry](DUALITY.md) and, when connected and authorized, the [private family head](https://github.com/GlacierEQ/Pro_Code/blob/main/DUALITY.md). Recover the existing Operator direction and latest runtime source/tests before any mutation. Preserve native logic, execution, audits, and history.
+
+This repository is the **public executable runtime strand**, as identified in `.helix/strand.json`, `HELIX.md`, `README.md` and `package.json`. Some older documents use "brains" for this strand; analytical ability is retained, but it doesn't make a software-design document evidence that private `Pro_Code` source has been accessed or that a CI/deployment ran. The private strand owns reusable GENIUS engineering doctrine and contributes execution; **both strands remain full-capability engineers**.
+
 <!-- MONOLITH:BEGIN -->
 ## Monolith Shared Upstream
 
