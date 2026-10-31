@@ -1,5 +1,8 @@
 # Pro-Code · Governed Local Engineering Operator
 
+**Double Helix engineering family:** [Public executable entry](DUALITY.md) ↔ [private canonical `Pro_Code` head](https://github.com/GlacierEQ/Pro_Code/blob/main/DUALITY.md). The existing runtime remains the implementation and verification source; private doctrine is loaded only with authorized GitHub access. No private corpus is mirrored into this repository.
+
+
 **A local engineering operator that distinguishes executable operations, declared roles, failed attempts and actually verified results.** It pairs a React/TypeScript cockpit with a dependency-free Node "Nexus" runtime, fail-closed worker dispatch, idempotent receipts, automatic workspace intelligence, and native verification in Rust and Haskell.
 
 [![Pro-Code native verification](https://github.com/GlacierEQ/pro-code/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/GlacierEQ/pro-code/actions/workflows/ci.yml)
