@@ -21,9 +21,9 @@ npm ci
 npm run lint && npm run typecheck
 npm test
 npm run build
-npm run code:complete -- --help
-npm run code:knowledge -- --help
-npm run code:refactor -- --help
+npm run code:complete -- --file src/workers.ts --line 1 --column 1 --limit 25
+npm run code:knowledge -- --symbol workersManager --definition-file src/workers.ts
+# Refactoring requires a real identifier position; see the read-only preview below.
 ```
 
 Core source routes: [package.json](package.json) · [Node runtime](server/nexus.mjs) · [code intelligence](scripts/code-intelligence.mjs) · [completion](scripts/code-completion.mjs) · [refactoring](scripts/code-refactor.mjs) · [architecture](ARCHITECTURE.md) · [CI](https://github.com/GlacierEQ/pro-code/actions).
@@ -92,50 +92,25 @@ This resolves static/re-export, literal dynamic imports and CommonJS `require()`
 
 ## Compiler-backed code completion
 
-The `code:complete` CLI uses the actual TypeScript language service and the project's `tsconfig.json`, including cross-file types and imported symbols. Suggestions are deterministic and machine-readable; no model calls, editor extension, file mutations, or autonomous patch claims are implied.
+The `code:complete` CLI uses the actual TypeScript language service and the project's `tsconfig.json`, including cross-file types and imported symbols. Suggestions are deterministic, machine-readable and **read-only**. It does not make model calls, apply patches, or certify a working editor integration.
 
 ```bash
 npm ci
 npm run code:complete -- --file src/workers.ts --line 1 --column 1 --limit 25
 npm run test:code-completion
-To resolve one candidate into **compiler-derived symbol signatures, documentation, tags and complete import-edit previews**, use:
-
-```sh
-npm run code:complete -- --file src/workers.ts --line 1 --column 1 --resolve-name ExampleName
 ```
 
-For duplicate names from multiple modules, pass `--resolve-source <module>` to identify the exact suggestion. An absent or ambiguous selection is a nonzero error, not a synthetic completion. Returned `resolution.code_actions[].changes` include workspace-relative paths and exact insertion/replacement spans; actions targeting external paths are explicitly marked `within_workspace: false` and their edits withheld. `requires_commands` identifies additional compiler commands that are not executed. **This is an actionable, read-only compiler edit preview**, not a source mutation, build result or deployed integration. Unresolved candidate listings continue to work without `--resolve-name`.
-```
-
-```
-
-```
-
-
-### Compiler-resolved completion details and diagnostics
-
-Use the opt-in TypeScript language-service details when a suggestion needs an import, and include syntax/semantic diagnostics for the target file:
+To obtain compiler-derived signatures, documentation, import-edit previews and diagnostics:
 
 ```bash
 npm run code:complete -- --file src/workers.ts --line 1 --column 1 --limit 25 --details --diagnostics
 ```
 
-`--details` asks TypeScript for symbol information, documentation and **real compiler-proposed code actions** (including auto-import text changes, file-relative paths and exact spans). It does **not** apply those edits, install packages, or certify the result. Text changes outside the resolved workspace are not surfaced. `--diagnostics` adds compiler syntax and semantic diagnostics with error codes and 1-based locations. Both switches are optional to keep ordinary completion fast. Validate edits with the compiler, tests and repository CI before using them in production.
+For a specific symbol, pass `--resolve-name` followed by an **actual candidate** returned in the completion list; optionally use `--resolve-source` to disambiguate duplicates. Missing or ambiguous candidates fail rather than returning fictional completions.
 
-```
+Returned `resolution.code_actions[].changes` include workspace-relative paths and exact proposed edits. `safe_workspace_scope` marks changes outside the safe workspace; `requires_commands` identifies compiler commands **not executed**. The implementation checks project inclusion, realpath/symlink boundaries, position validity and bounded output. `--fail-on-diagnostics` emits the structured report and exits nonzero when compiler diagnostics exist.
 
-
-### Compiler-resolved completion details and diagnostics
-
-Use the opt-in TypeScript language-service details when a suggestion needs an import, and include syntax/semantic diagnostics for the target file:
-
-```bash
-npm run code:complete -- --file src/workers.ts --line 1 --column 1 --limit 25 --details --diagnostics
-```
-
-`--details` asks TypeScript for symbol information, documentation and **real compiler-proposed code actions** (including auto-import text changes, file-relative paths and exact spans). It does **not** apply those edits, install packages, or certify the result. Text changes outside the resolved workspace are not surfaced. `--diagnostics` adds compiler syntax and semantic diagnostics with error codes and 1-based locations. Both switches are optional to keep ordinary completion fast. `--fail-on-diagnostics` also emits the machine-readable report, then exits nonzero if the active source/editor buffer contains diagnostics. Code actions report `safe_workspace_scope` and reject symlink escapes; they remain read-only proposals to apply against an exact matching editor revision. Validate edits with the compiler, tests and repository CI before using them in production.
-
-Positions use **1-based lines and columns**. Pass `--root` and `--config` for a different project and `--prefix` to filter suggested names. Results include insertion text, replacement spans where offered, compiler version, and flags for snippets and completion entries requiring additional import/code actions. The command rejects target files outside the workspace, symlink escapes, excluded project files, invalid positions, and unbounded output. No result may be represented as a compiled or applied patch; import code actions need a proper editor/integration before insertion.
+All positions are **1-based lines and columns**. `--root` and `--config` select another TypeScript project; `--prefix` filters suggestions. An import code action is a preview, not an applied patch; validate it with the compiler, tests and matching source revision before integration.
 
 ## Executable compiler-aware refactoring
 
