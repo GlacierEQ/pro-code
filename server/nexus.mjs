@@ -1,6 +1,6 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, rename, stat, writeFile } from 'node:fs/promises';
+import { mkdir, open, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -48,8 +48,27 @@ function digest(value) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
-function commonHeaders(response) {
-  response.setHeader('Access-Control-Allow-Origin', '*');
+const LOOPBACK_HOST = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::[0-9]{1,5})?$/i;
+
+// An arbitrary website must not gain read/write access to a local operator
+// merely because the service is bound to loopback. Custom remote origins
+// require an explicit, exact allowlist and a separate authentication boundary.
+function allowedBrowserOrigin(request, env) {
+  const origin = request.headers.origin;
+  if (origin === undefined) return null;
+  if (typeof origin !== 'string') return false;
+  let parsed;
+  try { parsed = new URL(origin); } catch { return false; }
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.origin !== origin) return false;
+  const ownHost = request.headers.host ?? '';
+  if (LOOPBACK_HOST.test(ownHost) && LOOPBACK_HOST.test(parsed.host)) return origin;
+  const allowlist = String(env.PRO_CODE_ALLOWED_ORIGINS ?? '').split(',').map(value => value.trim()).filter(Boolean);
+  return allowlist.includes(origin) ? origin : false;
+}
+
+function commonHeaders(response, origin = null) {
+  response.setHeader('Vary', 'Origin');
+  if (origin) response.setHeader('Access-Control-Allow-Origin', origin);
   response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Idempotency-Key, X-Case-Id, X-Trace-Id');
   response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   response.setHeader('Cache-Control', 'no-store');
@@ -189,46 +208,93 @@ async function persistMemory(target, entries, env, now) {
   if (!directory) return { status: 'unsupported', target, reason: `PRO_CODE_${target.toUpperCase()}_DIR is not configured` };
   await mkdir(directory, { recursive: true });
   const destination = path.join(directory, 'pro-code-memory.json');
-  const temporary = `${destination}.${process.pid}.tmp`;
+  // A unique private temp file avoids collisions between simultaneous writes
+  // in the same process. The final snapshot still uses last-writer-wins.
+  const temporary = `${destination}.${process.pid}.${randomUUID()}.tmp`;
   const snapshot = { schema_version: '1.0.0', source: 'pro-code', target, synced_at: now().toISOString(), entries };
   const content = `${JSON.stringify(snapshot, null, 2)}\n`;
-  await writeFile(temporary, content, { encoding: 'utf8', mode: 0o600 });
-  await rename(temporary, destination);
+  try {
+    await writeFile(temporary, content, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    await rename(temporary, destination);
+  } catch (error) {
+    await unlink(temporary).catch(() => {});
+    throw error;
+  }
   return {
     status: 'completed', target, path: destination, records_confirmed: entries.length,
     content_digest: createHash('sha256').update(content).digest('hex'), completed_at: snapshot.synced_at,
   };
 }
 
-async function serveStatic(requestPath, response) {
-  const relativePath = requestPath === '/' ? 'index.html' : decodeURIComponent(requestPath.replace(/^\/+/, ''));
-  const candidate = path.resolve(DIST, relativePath);
-  if (!candidate.startsWith(`${DIST}${path.sep}`) && candidate !== path.join(DIST, 'index.html')) return false;
-  let filePath = candidate;
+function insideDirectory(root, candidate) {
+  const relative = path.relative(root, candidate);
+  return relative === '' || (relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative));
+}
+
+async function resolveStaticPath(root, candidate) {
   try {
-    if ((await stat(filePath)).isDirectory()) filePath = path.join(filePath, 'index.html');
-  } catch {
-    filePath = path.join(DIST, 'index.html');
-  }
-  try {
-    if (!(await stat(filePath)).isFile()) return false;
-    commonHeaders(response);
-    response.statusCode = 200;
-    response.setHeader('Content-Type', CONTENT_TYPES[path.extname(filePath)] ?? 'application/octet-stream');
-    createReadStream(filePath).pipe(response);
-    return true;
-  } catch {
-    return false;
+    const actual = await realpath(candidate);
+    if (!insideDirectory(root, actual)) return { denied: true };
+    const metadata = await stat(actual);
+    if (metadata.isFile()) return { file: actual };
+    if (metadata.isDirectory()) return resolveStaticPath(root, path.join(actual, 'index.html'));
+    return { denied: true };
+  } catch (error) {
+    if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return { missing: true };
+    // Fail closed on permission and unexpected filesystem errors.
+    return { denied: true };
   }
 }
 
-export function createNexusHandler({ env = process.env, now = () => new Date(), automation = null } = {}) {
+async function serveStatic(requestPath, response, staticRoot = DIST) {
+  let root;
+  try { root = await realpath(staticRoot); } catch { return false; }
+  let relative;
+  try {
+    relative = requestPath === '/' ? 'index.html' : decodeURIComponent(requestPath.replace(/^[/]+/, ''));
+  } catch { return false; }
+  const requested = path.resolve(root, relative);
+  if (!insideDirectory(root, requested)) return false;
+
+  const first = await resolveStaticPath(root, requested);
+  // Do not turn an explicitly escaped, unreadable, or unauthorized file
+  // into an SPA fallback. The caller should return a 404 instead.
+  if (first.denied) return false;
+  const selected = first.file ? first : await resolveStaticPath(root, path.join(root, 'index.html'));
+  if (!selected.file) return false;
+
+  // Open the canonical path, not the user-controlled symlink path.
+  // Files that disappear between lookup and open fail without exposing anything else.
+  let handle;
+  try {
+    handle = await open(selected.file, 'r');
+    if (!(await handle.stat()).isFile()) { await handle.close(); return false; }
+  } catch { if (handle) await handle.close(); return false; }
+  commonHeaders(response);
+  response.statusCode = 200;
+  response.setHeader('Content-Type', CONTENT_TYPES[path.extname(selected.file)] ?? 'application/octet-stream');
+  const stream = handle.createReadStream();
+  stream.on('error', () => response.destroy());
+  stream.pipe(response);
+  return true;
+}
+
+export function createNexusHandler({ env = process.env, now = () => new Date(), automation = null, staticRoot = DIST } = {}) {
   const idempotency = new Map();
   const receipts = [];
   const contexts = new Map();
 
   return async function nexusHandler(request, response) {
-    commonHeaders(response);
+    const origin = allowedBrowserOrigin(request, env);
+    const untrusted = origin === false
+      || (origin === null && request.headers['sec-fetch-site'] === 'cross-site');
+    commonHeaders(response, untrusted ? null : origin);
+    if (untrusted) {
+      sendJson(response, 403, {
+        status: 'rejected', success: false, error: 'Browser origin is not authorized for local Nexus',
+      });
+      return;
+    }
     if (request.method === 'OPTIONS') {
       response.statusCode = 204;
       response.end();
@@ -293,6 +359,11 @@ export function createNexusHandler({ env = process.env, now = () => new Date(), 
             return;
           }
           const original = existing.payload ?? await existing.inFlight;
+          if (existing.payload) {
+            // Recently observed completed receipts remain resident longer.
+            idempotency.delete(key);
+            idempotency.set(key, existing);
+          }
           sendJson(response, original.success ? 200 : 501, original, { 'X-Idempotent-Replay': 'true' });
           return;
         }
@@ -307,7 +378,16 @@ export function createNexusHandler({ env = process.env, now = () => new Date(), 
           idempotency.delete(key);
           throw error;
         }
+        // The receipt journal is bounded. Retaining every completed replay key
+        // forever would otherwise leak memory under long-lived local operation.
+        idempotency.delete(key);
         idempotency.set(key, { envelopeDigest, payload });
+        for (const [oldKey, record] of idempotency) {
+          if (idempotency.size <= MAX_RECEIPTS) break;
+          // Never evict running work: doing so could execute a concurrent
+          // replay twice. The bound applies to completed receipts only.
+          if (!record.inFlight) idempotency.delete(oldKey);
+        }
         receipts.unshift(payload.receipt);
         if (receipts.length > MAX_RECEIPTS) receipts.length = MAX_RECEIPTS;
         sendJson(response, payload.success ? 200 : 501, payload);
@@ -341,7 +421,7 @@ export function createNexusHandler({ env = process.env, now = () => new Date(), 
         sendJson(response, result.status === 'completed' ? 200 : 501, result);
         return;
       }
-      if (request.method === 'GET' && await serveStatic(url.pathname, response)) return;
+      if (request.method === 'GET' && await serveStatic(url.pathname, response, staticRoot)) return;
       sendJson(response, 404, { status: 'not_found', error: `No route for ${request.method} ${url.pathname}` });
     } catch (error) {
       const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
@@ -356,8 +436,9 @@ export async function startNexusServer({
   env = process.env,
   now,
   automation = null,
+  staticRoot = DIST,
 } = {}) {
-  const server = http.createServer(createNexusHandler({ env, now, automation }));
+  const server = http.createServer(createNexusHandler({ env, now, automation, staticRoot }));
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, resolve);

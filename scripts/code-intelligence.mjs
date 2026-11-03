@@ -27,7 +27,20 @@ function diagnosticRecord(root, diagnostic) {
   };
 }
 
-function sourceImports(sourceFile) {
+function sourceImports(sourceFile, checker) {
+  function locallyBoundRequire(identifier) {
+    const binding = checker.getSymbolAtLocation(identifier);
+    return (binding?.declarations ?? []).some(declaration => {
+      if (ts.isParameter(declaration) || ts.isImportSpecifier(declaration) ||
+          ts.isImportClause(declaration) || ts.isImportEqualsDeclaration(declaration)) return true;
+      if (ts.isFunctionDeclaration(declaration)) return Boolean(declaration.body);
+      if (ts.isVariableDeclaration(declaration)) {
+        const statement = declaration.parent?.parent;
+        return !(statement && (ts.getCombinedModifierFlags(statement) & ts.ModifierFlags.Ambient));
+      }
+      return false;
+    });
+  }
   const imports = [];
   const push = (specifier, kind, line) => imports.push({ specifier, kind, line });
   function visit(node) {
@@ -47,7 +60,8 @@ function sourceImports(sourceFile) {
         && ts.isIdentifier(expression.expression)
         && expression.expression.text === 'require'
         && expression.name.text === 'resolve';
-      if (isImport || isRequire || isRequireResolve) {
+      const requireName = isRequire ? expression : isRequireResolve ? expression.expression : null;
+      if (isImport || ((isRequire || isRequireResolve) && !locallyBoundRequire(requireName))) {
         const line = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
         const firstArgument = node.arguments[0];
         const specifier = firstArgument && ts.isStringLiteralLike(firstArgument) ? firstArgument.text : null;
@@ -60,7 +74,7 @@ function sourceImports(sourceFile) {
   return imports;
 }
 
-export async function analyzeCodebase({ root = process.cwd(), config = 'tsconfig.json', impact = null } = {}) {
+export async function analyzeCodebase({ root = process.cwd(), config = 'tsconfig.json', impact = null, onProgram = null } = {}) {
   const workspaceRoot = canonicalWorkspace(root);
   const configuration = canonicalFile(workspaceRoot, config, 'tsconfig');
   const loaded = ts.readConfigFile(configuration, ts.sys.readFile);
@@ -69,6 +83,11 @@ export async function analyzeCodebase({ root = process.cwd(), config = 'tsconfig
   if (parsed.errors.length) throw new Error(parsed.errors.map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n')).join('; '));
   if (!parsed.fileNames.length) throw new Error('TypeScript configuration contains no source files');
   const program = ts.createProgram({ rootNames: parsed.fileNames, options: parsed.options, projectReferences: parsed.projectReferences });
+  // Allow companion tools to use this exact compiler snapshot instead of rebuilding it.
+  if (onProgram !== null) {
+    if (typeof onProgram !== 'function') throw new Error('onProgram must be a function');
+    onProgram(program);
+  }
   const checker = program.getTypeChecker();
   const sourceFiles = program.getSourceFiles().filter(file => {
     if (file.isDeclarationFile || relativeWithin(workspaceRoot, file.fileName) === null || normalize(file.fileName).includes('/node_modules/')) return false;
@@ -77,14 +96,18 @@ export async function analyzeCodebase({ root = process.cwd(), config = 'tsconfig
     return true;
   });
   const fileSet = new Set(sourceFiles.map(file => normalize(path.relative(workspaceRoot, file.fileName))));
+  // Cache repeated TypeScript resolution decisions for project-scale graph discovery.
+  const resolutionCache = ts.createModuleResolutionCache(workspaceRoot, name => ts.sys.useCaseSensitiveFileNames ? name : name.toLowerCase(), parsed.options);
   const files = sourceFiles.map(file => {
     const filename = normalize(path.relative(workspaceRoot, file.fileName));
-    const edges = sourceImports(file).map(item => {
+    const edges = sourceImports(file, checker).map(item => {
       if (!item.specifier) return { ...item, kind: item.kind, status: 'dynamic-unknown', target: null };
-      const resolution = ts.resolveModuleName(item.specifier, file.fileName, parsed.options, ts.sys).resolvedModule;
+      const resolution = ts.resolveModuleName(item.specifier, file.fileName, parsed.options, ts.sys, resolutionCache).resolvedModule;
       if (!resolution) return { ...item, status: 'unresolved', target: null };
       const target = relativeWithin(workspaceRoot, resolution.resolvedFileName);
-      return { ...item, status: target && fileSet.has(target) ? 'internal' : 'external-or-unindexed', target: target && fileSet.has(target) ? target : null };
+      if (target && fileSet.has(target)) return { ...item, status: 'internal', target };
+      if (target !== null && target !== '') return { ...item, status: 'internal-unindexed', target };
+      return { ...item, status: 'external', target: null };
     });
     const symbol = checker.getSymbolAtLocation(file);
     const exports = symbol ? checker.getExportsOfModule(symbol).map(sym => sym.getName()).sort() : [];
@@ -94,32 +117,50 @@ export async function analyzeCodebase({ root = process.cwd(), config = 'tsconfig
   const reverse = new Map(files.map(file => [file.path, new Set()]));
   for (const file of files) for (const imp of file.imports) if (imp.status === 'internal') reverse.get(imp.target)?.add(file.path);
   let affected = null;
+  let impactDetails = null;
   let requested = null;
   if (impact !== null) {
     requested = normalize(path.relative(workspaceRoot, path.resolve(workspaceRoot, impact)));
     if (!fileSet.has(requested)) throw new Error(`Impact target is not included in the TypeScript program: ${requested}`);
     const visited = new Set([requested]);
+    const predecessor = new Map([[requested, null]]);
     const queue = [requested];
     for (let index = 0; index < queue.length; index++) {
       const next = [...(reverse.get(queue[index]) ?? [])].sort();
-      for (const dependent of next) if (!visited.has(dependent)) { visited.add(dependent); queue.push(dependent); }
+      for (const dependent of next) if (!visited.has(dependent)) {
+        visited.add(dependent);
+        predecessor.set(dependent, queue[index]);
+        queue.push(dependent);
+      }
     }
     affected = [...visited].sort();
+    const dependencyPaths = {};
+    for (const file of affected) {
+      const chain = [];
+      for (let cursor = file; cursor !== null; cursor = predecessor.get(cursor) ?? null) chain.push(cursor);
+      dependencyPaths[file] = chain.reverse();
+    }
+    impactDetails = {
+      direct_dependents: [...(reverse.get(requested) ?? [])].sort(),
+      dependency_paths: dependencyPaths,
+    };
   }
   const allImports = files.flatMap(file => file.imports.map(imp => ({ importer: file.path, ...imp })));
   const unresolvedCount = allImports.filter(imp => imp.status === 'unresolved').length;
   const dynamicUnknownCount = allImports.filter(imp => imp.status === 'dynamic-unknown').length;
+  const unindexedInternalCount = allImports.filter(imp => imp.status === 'internal-unindexed').length;
   return {
     schema_version: '1.0.0', operation: 'typescript_program_analysis',
-    scope: { workspace: workspaceRoot, tsconfig: normalize(path.relative(workspaceRoot, configuration)), compiler_version: ts.version, source_file_count: files.length, imports_checked: allImports.length, analysis_complete: unresolvedCount === 0 && dynamicUnknownCount === 0 },
+    scope: { workspace: workspaceRoot, tsconfig: normalize(path.relative(workspaceRoot, configuration)), compiler_version: ts.version, source_file_count: files.length, imports_checked: allImports.length, analysis_complete: unresolvedCount === 0 && dynamicUnknownCount === 0 && unindexedInternalCount === 0 && diagnostics.length === 0 },
     limitations: [
       'Dependency graph includes source files in the TypeScript program only, not every file in the repository.',
+      'Workspace-local files outside the indexed program are explicitly classified internal-unindexed, not silently assumed covered.',
       'Non-literal import() and CommonJS require()/require.resolve() paths cannot be resolved statically; their presence is reported explicitly.',
-      'CommonJS require-call detection is syntax-based and does not establish whether a locally shadowed require is the Node.js loader.',
+      'Compiler bindings exclude locally shadowed require functions; ambient/global requires still depend on runtime loader behavior.',
       'Static diagnostics and dependency analysis are not proof of production behavior or safe deployment.',
     ],
-    findings: { diagnostic_count: diagnostics.length, unresolved_import_count: unresolvedCount, dynamic_unknown_count: dynamicUnknownCount },
-    diagnostics, files, impact: requested === null ? null : { target: requested, affected_files: affected },
+    findings: { diagnostic_count: diagnostics.length, unresolved_import_count: unresolvedCount, dynamic_unknown_count: dynamicUnknownCount, unindexed_internal_import_count: unindexedInternalCount },
+    diagnostics, files, impact: requested === null ? null : { target: requested, affected_files: affected, ...impactDetails },
   };
 }
 

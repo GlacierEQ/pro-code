@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { startNexusServer } from './nexus.mjs';
 
 let server;
@@ -276,4 +280,238 @@ test('risk boundaries remain enforced for local scope and read-only capability',
     constraints: { ...envelope().constraints, human_review_required: false, external_actions: 'allowed' },
   });
   assert.equal((await dispatch(external)).status, 422);
+});
+
+
+test('foreign browser origins cannot read Nexus health or mutate local contexts', async () => {
+  const foreign = 'https://untrusted.example';
+  const read = await fetch(`${baseUrl}/health`, { headers: { Origin: foreign } });
+  assert.equal(read.status, 403);
+  assert.equal(read.headers.get('access-control-allow-origin'), null);
+  assert.equal(read.headers.get('vary'), 'Origin');
+  const write = await fetch(`${baseUrl}/context/browser-isolation-test`, {
+    method: 'POST',
+    headers: { Origin: foreign, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data: { injected: true } }),
+  });
+  assert.equal(write.status, 403);
+  const readback = await fetch(`${baseUrl}/context/browser-isolation-test`);
+  assert.deepEqual((await readback.json()).data, {});
+});
+
+test('trusted local development origins can preflight without granting wildcard CORS', async () => {
+  const devOrigin = 'http://localhost:5173';
+  const preflight = await fetch(`${baseUrl}/api/v1/workers/strategist/execute`, {
+    method: 'OPTIONS',
+    headers: {
+      Origin: devOrigin,
+      'Access-Control-Request-Method': 'POST',
+      'Access-Control-Request-Headers': 'Content-Type, Idempotency-Key',
+    },
+  });
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get('access-control-allow-origin'), devOrigin);
+  const local = await fetch(`${baseUrl}/health`, { headers: { Origin: devOrigin } });
+  assert.equal(local.status, 200);
+  assert.equal(local.headers.get('access-control-allow-origin'), devOrigin);
+  assert.equal((await fetch(`${baseUrl}/health`, { headers: { Origin: 'null' } })).status, 403);
+  assert.equal((await fetch(`${baseUrl}/health`, { headers: { 'Sec-Fetch-Site': 'cross-site' } })).status, 403);
+});
+
+test('remote browser origins require explicit exact allowlisting', async () => {
+  const configured = await startNexusServer({
+    host: '127.0.0.1', port: 0,
+    env: { PRO_CODE_ALLOWED_ORIGINS: 'https://trusted.example, https://second.example' },
+  });
+  try {
+    const permitted = await fetch(`${configured.url}/health`, { headers: { Origin: 'https://trusted.example' } });
+    assert.equal(permitted.status, 200);
+    assert.equal(permitted.headers.get('access-control-allow-origin'), 'https://trusted.example');
+    const rejected = await fetch(`${configured.url}/health`, { headers: { Origin: 'https://trusted.example.attacker.test' } });
+    assert.equal(rejected.status, 403);
+    assert.equal(rejected.headers.get('access-control-allow-origin'), null);
+  } finally {
+    await new Promise((resolve, reject) => configured.server.close(error => error ? reject(error) : resolve()));
+  }
+});
+
+test('bounded idempotency keeps hot receipts and expires cold completed keys', async () => {
+  let invoked = 0;
+  const runtime = await startNexusServer({
+    host: '127.0.0.1', port: 0,
+    automation: {
+      async executeCapability() {
+        invoked++;
+        return {
+          handled: true, operation: 'workspace_inventory', verified: true,
+          objective_completed: true,
+          summary: { manifest_id: 'sha256-cache-fixture', inventory_complete: true,
+            file_count: 1, hash_complete: true, hash_skipped_files: 0 },
+          artifacts: { manifest: '/fixture/workspace-manifest.json' },
+        };
+      },
+    },
+  });
+  const body = key => envelope({
+    worker: 'automation-orchestrator',
+    capability: 'inventoryWorkspace',
+    constraints: { ...envelope().constraints, human_review_required: false },
+    case_id: 'workspace:local',
+    task_id: `cache-task-${key}`,
+    idempotency_key: `cache-key-${key}`,
+  });
+  try {
+    for (let i = 0; i < 500; i++) {
+      const response = await dispatch(body(i), runtime.url);
+      assert.equal(response.status, 200);
+    }
+    assert.equal(invoked, 500);
+    // Touch the oldest entry to establish true access-based retention.
+    const hotReplay = await dispatch(body(0), runtime.url);
+    assert.equal(hotReplay.headers.get('x-idempotent-replay'), 'true');
+    assert.equal(invoked, 500);
+
+    const newer = await dispatch(body(500), runtime.url);
+    assert.equal(newer.status, 200);
+    assert.equal(invoked, 501);
+
+    const recentReplay = await dispatch(body(0), runtime.url);
+    assert.equal(recentReplay.headers.get('x-idempotent-replay'), 'true');
+    assert.equal(invoked, 501);
+
+    // Key #1 is now cold and legitimately absent from the bounded in-memory cache.
+    const old = await dispatch(body(1), runtime.url);
+    assert.equal(old.status, 200);
+    assert.equal(old.headers.get('x-idempotent-replay'), null);
+    assert.equal(invoked, 502);
+
+    const journal = await fetch(`${runtime.url}/api/v1/runtime/receipts`);
+    assert.equal((await journal.json()).receipts.length, 500);
+  } finally {
+    await new Promise((resolve, reject) => runtime.server.close(error => error ? reject(error) : resolve()));
+  }
+});
+
+
+test('active execution remains single-flight while completed cache is saturated', async () => {
+  let invoked = 0;
+  let release;
+  let started;
+  const held = new Promise(resolve => { release = resolve; });
+  const underway = new Promise(resolve => { started = resolve; });
+  const runtime = await startNexusServer({
+    host: '127.0.0.1', port: 0,
+    automation: {
+      async executeCapability(_capability, params) {
+        invoked++;
+        if (params.tag === 'held') {
+          started();
+          await held;
+        }
+        return {
+          handled: true, operation: 'workspace_inventory', verified: true,
+          objective_completed: true,
+          summary: { manifest_id: 'sha256-pressure-fixture', inventory_complete: true,
+            file_count: 1, hash_complete: true, hash_skipped_files: 0 },
+          artifacts: { manifest: '/fixture/workspace-manifest.json' },
+        };
+      },
+    },
+  });
+  const makeBody = tag => envelope({
+    worker: 'automation-orchestrator',
+    capability: 'inventoryWorkspace',
+    constraints: { ...envelope().constraints, human_review_required: false },
+    case_id: 'workspace:local', task_id: `pressure-task-${tag}`,
+    idempotency_key: `pressure-key-${tag}`, params: { tag },
+  });
+  try {
+    const original = dispatch(makeBody('held'), runtime.url);
+    await underway;
+    for (let i = 0; i < 510; i++) {
+      const response = await dispatch(makeBody(String(i)), runtime.url);
+      assert.equal(response.status, 200);
+    }
+    assert.equal(invoked, 511);
+    const duplicate = dispatch(makeBody('held'), runtime.url);
+    release();
+    const [first, second] = await Promise.all([original, duplicate]);
+    assert.equal(first.status, 200);
+    assert.equal(second.status, 200);
+    assert.equal(second.headers.get('x-idempotent-replay'), 'true');
+    assert.deepEqual(await first.json(), await second.json());
+    assert.equal(invoked, 511, 'cache pressure must not duplicate active work');
+  } finally {
+    release();
+    await new Promise((resolve, reject) => runtime.server.close(error => error ? reject(error) : resolve()));
+  }
+});
+
+test('static serving reads canonical in-root files and SPA fallback without disclosing outside files', async () => {
+  const fixture = mkdtempSync(path.join(tmpdir(), 'pro-code-static-root-'));
+  const root = path.join(fixture, 'dist');
+  const outside = path.join(fixture, 'outside');
+  mkdirSync(root);
+  mkdirSync(outside);
+  writeFileSync(path.join(root, 'index.html'), '<h1>safe index</h1>');
+  writeFileSync(path.join(root, 'app.js'), 'console.log("safe");');
+  writeFileSync(path.join(outside, 'secret.txt'), 'SECRET-DO-NOT-SERVE');
+  symlinkSync(path.join(outside, 'secret.txt'), path.join(root, 'leak.txt'));
+  symlinkSync(outside, path.join(root, 'private'));
+  symlinkSync(path.join(root, 'app.js'), path.join(root, 'alias.js'));
+  const runtime = await startNexusServer({ host: '127.0.0.1', port: 0, staticRoot: root });
+  try {
+    const normal = await fetch(runtime.url + '/app.js');
+    assert.equal(normal.status, 200);
+    assert.equal(await normal.text(), 'console.log("safe");');
+    const alias = await fetch(runtime.url + '/alias.js');
+    assert.equal(alias.status, 200);
+    assert.equal(await alias.text(), 'console.log("safe");');
+    const fallback = await fetch(runtime.url + '/deep/link');
+    assert.equal(fallback.status, 200);
+    assert.equal(await fallback.text(), '<h1>safe index</h1>');
+    for (const filename of ['/leak.txt', '/private/secret.txt', '/%2f..%2foutside%2fsecret.txt']) {
+      const denied = await fetch(runtime.url + filename);
+      assert.equal(denied.status, 404, filename);
+      assert.doesNotMatch(await denied.text(), /SECRET-DO-NOT-SERVE|safe index/, filename);
+    }
+  } finally {
+    await new Promise((resolve, reject) => runtime.server.close(error => error ? reject(error) : resolve()));
+    rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
+test('parallel memory sync writes stay atomic without shared temporary-file races', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'pro-code-memory-atomic-'));
+  const runtime = await startNexusServer({
+    host: '127.0.0.1', port: 0, env: { PRO_CODE_ASPEN_DIR: directory },
+  });
+  try {
+    const responses = await Promise.all(Array.from({ length: 40 }, (_, index) =>
+      fetch(`${runtime.url}/api/v1/memory/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target: 'aspen', entries: [{ writer: index, text: `payload-${index}` }],
+        }),
+      }),
+    ));
+    for (const response of responses) {
+      const body = await response.json();
+      assert.equal(response.status, 200, JSON.stringify(body));
+      assert.equal(body.status, 'completed');
+      assert.equal(body.records_confirmed, 1);
+    }
+    const final = path.join(directory, 'pro-code-memory.json');
+    const snapshot = JSON.parse(await readFile(final, 'utf8'));
+    assert.equal(snapshot.schema_version, '1.0.0');
+    assert.equal(snapshot.entries.length, 1);
+    assert.ok(Number.isInteger(snapshot.entries[0].writer));
+    assert.ok(snapshot.entries[0].writer >= 0 && snapshot.entries[0].writer < 40);
+    assert.deepEqual(await readdir(directory), ['pro-code-memory.json']);
+    assert.equal((await stat(final)).mode & 0o777, 0o600);
+  } finally {
+    await new Promise((resolve, reject) => runtime.server.close(error => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
 });

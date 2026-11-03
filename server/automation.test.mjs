@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, test } from 'node:test';
@@ -151,6 +151,45 @@ test('concurrent scan rejects files changed during hashing instead of publishing
     },
   });
   await assert.rejects(() => automation.run('mutating-file'), /Workspace scan incomplete: 1 files could not be hashed reliably/);
+  assert.equal(automation.getStatus().state, 'error');
+  assert.equal(automation.getStatus().latest, null);
+});
+
+test('metadata stat pool overlaps I/O with a strict cap and preserves deterministic scan evidence', async () => {
+  const root = await fixture();
+  let active = 0;
+  let peak = 0;
+  const automation = new WorkspaceAutomation({
+    workspaceRoot: root,
+    env: { PRO_CODE_STAT_CONCURRENCY: '2', PRO_CODE_HASH_CONCURRENCY: '1' },
+    statFile: async file => {
+      active++;
+      peak = Math.max(peak, active);
+      try { await new Promise(resolve => setImmediate(resolve)); return await stat(file); }
+      finally { active--; }
+    },
+  });
+  const status = await automation.run('metadata-parallel');
+  const manifest = JSON.parse(await readFile(status.latest.manifest_path, 'utf8'));
+  assert.equal(peak, 2);
+  assert.equal(manifest.summary.file_count, 3);
+  assert.equal(manifest.summary.hash_complete, true);
+  assert.deepEqual(manifest.files.map(x => x.path),
+    ['README.md', 'case/Docket-Order-Exhibit.txt', 'case/copy.txt'].sort((a,b) => a.localeCompare(b)));
+  assert.equal(manifest.duplicates[0].copies, 2);
+});
+
+test('metadata read failure fails closed and does not publish partial inventory', async () => {
+  const root = await fixture();
+  const automation = new WorkspaceAutomation({
+    workspaceRoot: root,
+    env: { PRO_CODE_STAT_CONCURRENCY: '3' },
+    statFile: async file => {
+      if (file.endsWith('copy.txt')) throw new Error('injected stat failure');
+      return stat(file);
+    },
+  });
+  await assert.rejects(automation.run('stat-error'), /could not stat.*copy.txt.*injected stat failure/);
   assert.equal(automation.getStatus().state, 'error');
   assert.equal(automation.getStatus().latest, null);
 });

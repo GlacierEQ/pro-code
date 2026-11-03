@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { execFile, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, symlinkSync, readFileSync } from 'node:fs';
+import fs from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, symlinkSync, unlinkSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { completeCode } from './code-completion.mjs';
+import { resolveCompletion } from './code-completion-resolve.mjs';
 
 function fixture(files) {
   const root = mkdtempSync(path.join(tmpdir(), 'pro-code-completion-'));
@@ -118,4 +120,203 @@ test('CLI accepts unsaved text from stdin and provides inferred prefix and detai
     assert.equal(report.source_kind, 'editor-buffer');
     assert.ok(report.entries[0].display_text.includes('current'));
   } finally { dispose(root); }
+});
+
+test('compiler-backed completion details include a real auto-import edit proposal', () => {
+  const root = fixture({
+    'library.ts': 'export function rocketLaunch(): void {}\n',
+    'main.ts': 'rock',
+  });
+  try {
+    const initial = readFileSync(path.join(root, 'src/main.ts'), 'utf8');
+    const result = completeCode({
+      root, file: 'src/main.ts', line: 1, column: 5,
+      prefix: 'rocket', includeDetails: true,
+    });
+    const suggestion = result.entries.find(entry => entry.name === 'rocketLaunch');
+    assert.ok(suggestion, 'compiler should offer the module export');
+    assert.equal(suggestion.requires_code_action, true);
+    assert.ok(suggestion.code_actions?.length, 'auto-import must have a concrete code action');
+    const edits = suggestion.code_actions.flatMap(action => action.changes);
+    assert.ok(edits.some(edit => edit.file === 'src/main.ts'
+      && edit.edits.some(change => change.new_text.includes('import'))));
+    assert.equal(readFileSync(path.join(root, 'src/main.ts'), 'utf8'), initial, 'completion must remain read-only');
+    assert.ok(!Object.hasOwn(completeCode({
+      root, file: 'src/main.ts', line: 1, column: 5, prefix: 'rocket',
+    }).entries[0], 'code_actions'), 'expensive details are strictly opt-in');
+  } finally { dispose(root); }
+});
+
+test('optional compiler diagnostics report semantic errors with source locations', () => {
+  const root = fixture({
+    'main.ts': 'const answer: number = "wrong";\nans',
+  });
+  try {
+    const report = completeCode({
+      root, file: 'src/main.ts', line: 2, column: 4,
+      prefix: 'ans', includeDiagnostics: true,
+    });
+    const error = report.diagnostics.find(item => item.code === 2322);
+    assert.ok(error, 'TypeScript must detect incompatible assignment');
+    assert.equal(error.category, 'error');
+    assert.equal(error.line, 1);
+    assert.ok(error.column >= 1);
+    const plain = completeCode({ root, file: 'src/main.ts', line: 2, column: 4 });
+    assert.equal(Object.hasOwn(plain, 'diagnostics'), false);
+    assert.throws(() => completeCode({
+      root, file: 'src/main.ts', line: 2, column: 4, includeDetails: 'true',
+    }), /must be booleans/);
+  } finally { dispose(root); }
+});
+
+test('CLI exposes details and diagnostics without requiring an editor or writing files', async () => {
+  const root = fixture({
+    'library.ts': 'export const stellarObject = 42;\n',
+    'main.ts': 'stel',
+  });
+  const cli = fileURLToPath(new URL('./code-completion.mjs', import.meta.url));
+  try {
+    const { stdout } = await promisify(execFile)(process.execPath, [
+      cli, '--root', root, '--file', 'src/main.ts', '--line', '1',
+      '--column', '5', '--prefix', 'stellar', '--details', '--diagnostics',
+    ]);
+    const report = JSON.parse(stdout);
+    assert.ok(Array.isArray(report.diagnostics));
+    assert.ok(report.entries.some(item => item.name === 'stellarObject'
+      && item.code_actions.length > 0));
+    await assert.rejects(promisify(execFile)(process.execPath, [cli, '--wat']), /Unknown argument/);
+  } finally { dispose(root); }
+});
+
+
+test('completion details expose scoped auto-import actions and compiler JSDoc', () => {
+  const root = fixture({ 'types.ts': '/** A documented export */\nexport const alphaBeta = 1;\n', 'main.ts': 'alp' });
+  try {
+    const result = completeCode({ root, file: 'src/main.ts', line: 1, column: 4, prefix: 'alp', includeDetails: true });
+    const entry = result.entries.find(item => item.name === 'alphaBeta');
+    assert.ok(entry);
+    assert.match(entry.documentation, /documented export/);
+    assert.equal(entry.action_resolved, true);
+    const action = entry.code_actions.find(item => item.changes.some(c => c.file === 'src/main.ts'));
+    assert.ok(action);
+    assert.equal(action.safe_workspace_scope, true);
+    assert.match(action.changes[0].edits[0].new_text, /import\s+\{\s*alphaBeta\s*\}/);
+    assert.equal(readFileSync(path.join(root, 'src/main.ts'), 'utf8'), 'alp');
+  } finally { dispose(root); }
+});
+
+test('diagnostic exit mode keeps JSON and validates unsaved editor buffers without writing', async () => {
+  const root = fixture({ 'main.ts': 'const count: number = 12;\ncount' });
+  const cli = fileURLToPath(new URL('./code-completion.mjs', import.meta.url));
+  const dirty = 'const count: number = "wrong";\ncount';
+  try {
+    const report = completeCode({ root, file: 'src/main.ts', line: 2, column: 6, content: dirty, includeDiagnostics: true });
+    assert.ok(report.diagnostic_count > 0);
+    assert.ok(report.diagnostics.some(d => d.code === 2322 && d.line === 1));
+    assert.equal(completeCode({ root, file: 'src/main.ts', line: 2, column: 6, includeDiagnostics: true }).diagnostic_count, 0);
+    const run = spawnSync(process.execPath, [cli, '--root', root, '--file', 'src/main.ts',
+      '--line', '2', '--column', '6', '--content-stdin', '--fail-on-diagnostics'], { input: dirty, encoding: 'utf8' });
+    assert.equal(run.status, 1);
+    assert.ok(JSON.parse(run.stdout).diagnostic_count > 0);
+    assert.equal(readFileSync(path.join(root, 'src/main.ts'), 'utf8'), 'const count: number = 12;\ncount');
+  } finally { dispose(root); }
+});
+
+test('resolves compiler documentation and complete auto-import edits without writing files', () => {
+  const source = 'addVal';
+  const root = fixture({
+    'helpers.ts': '/** Adds two values together. */\nexport function addValues(a: number, b: number) { return a + b; }\n',
+    'main.ts': source,
+  });
+  try {
+    const result = completeCode({ root, file: 'src/main.ts', line: 1, column: 7, resolveName: 'addValues' });
+    assert.equal(result.schema_version, '1.1.0');
+    assert.equal(result.resolution.name, 'addValues');
+    assert.match(result.resolution.display, /addValues/);
+    assert.match(result.resolution.documentation, /Adds two values together/);
+    const action = result.resolution.code_actions.find(x => /import/i.test(x.description));
+    assert.ok(action, 'TypeScript must provide an import code action');
+    assert.equal(action.within_workspace, true);
+    assert.equal(action.requires_commands, false);
+    assert.equal(action.changes[0].file, 'src/main.ts');
+    assert.match(action.changes[0].text_changes[0].new_text, /import.*addValues.*helpers/);
+    assert.equal(readFileSync(path.join(root, 'src/main.ts'), 'utf8'), source);
+  } finally { dispose(root); }
+});
+
+test('does not expose or claim a code action that escapes workspace through a symlink', () => {
+  const root = fixture({ 'main.ts': 'a' });
+  const outside = mkdtempSync(path.join(tmpdir(), 'pro-code-completion-edits-'));
+  writeFileSync(path.join(outside, 'outside.ts'), 'const secret = 1;');
+  symlinkSync(path.join(outside, 'outside.ts'), path.join(root, 'src', 'escaped.ts'));
+  try {
+    const service = { getCompletionEntryDetails: () => ({
+      kind: 'var', displayParts: [{ text: 'a', kind: 'text' }],
+      codeActions: [{ description: 'unsafe cross-workspace edit', changes: [
+        { fileName: path.join(root, 'src', 'escaped.ts'), textChanges: [{ span: { start: 0, length: 0 }, newText: 'LEAK' }] },
+      ] }],
+    }) };
+    const resolved = resolveCompletion({
+      service, workspace: root, file: path.join(root, 'src', 'main.ts'),
+      position: 1, entries: [{ name: 'a' }], name: 'a',
+    });
+    assert.equal(resolved.code_actions[0].within_workspace, false);
+    assert.deepEqual(resolved.code_actions[0].changes, []);
+    assert.equal(readFileSync(path.join(outside, 'outside.ts'), 'utf8'), 'const secret = 1;');
+  } finally { dispose(root); dispose(outside); }
+});
+
+test('rejects absent and ambiguous completion resolution, and malformed source selection', () => {
+  const root = fixture({ 'main.ts': 'alpha' });
+  try {
+    assert.throws(() => completeCode({ root, file: 'src/main.ts', line: 1, column: 6, resolveName: 'notActuallyHere' }), /not available/);
+    assert.throws(() => completeCode({ root, file: 'src/main.ts', line: 1, column: 6, resolveSource: 'wrong' }), /requires resolve-name/);
+    const service = { getCompletionEntryDetails: () => ({}) };
+    const base = { service, workspace: root, file: path.join(root, 'src', 'main.ts'), position: 5,
+      entries: [{ name: 'alpha', source: './one' }, { name: 'alpha', source: './two' }], name: 'alpha' };
+    assert.throws(() => resolveCompletion(base), /ambiguous/);
+    assert.equal(resolveCompletion({ ...base, source: './one' }).source, './one');
+  } finally { dispose(root); }
+});
+
+test('CLI resolves a selected suggestion and rejects nonexistent resolution names', async () => {
+  const root = fixture({ 'main.ts': 'const alpha = 1;\nal' });
+  const cli = fileURLToPath(new URL('./code-completion.mjs', import.meta.url));
+  try {
+    const args = [cli, '--root', root, '--file', 'src/main.ts', '--line', '2', '--column', '3'];
+    const { stdout } = await promisify(execFile)(process.execPath, [...args, '--resolve-name', 'alpha']);
+    assert.equal(JSON.parse(stdout).resolution.name, 'alpha');
+    await assert.rejects(promisify(execFile)(process.execPath, [...args, '--resolve-name', 'missingName']), /not available/);
+  } finally { dispose(root); }
+});
+
+test('rejects a post-validation symlink swap before reading editor disk', () => {
+  const root = fixture({ 'main.ts': 'const alpha = 1;\\nal' });
+  const outside = mkdtempSync(path.join(tmpdir(), 'pro-code-completion-outside-'));
+  const target = path.join(root, 'src', 'main.ts');
+  const secret = path.join(outside, 'secret.ts');
+  writeFileSync(secret, 'const secret = 1;');
+  const original = fs.realpathSync;
+  let targetChecks = 0;
+  let swapped = false;
+  try {
+    fs.realpathSync = function (filename, ...args) {
+      if (path.resolve(String(filename)) === target) {
+        targetChecks += 1;
+        if (targetChecks === 2) {
+          unlinkSync(target);
+          symlinkSync(secret, target);
+          swapped = true;
+        }
+      }
+      return original.call(this, filename, ...args);
+    };
+    assert.throws(() => completeCode({ root, file: 'src/main.ts', line: 2, column: 3 }),
+      /target file changed or resolves outside workspace/);
+    assert.equal(swapped, true, 'the race injection must actually occur');
+  } finally {
+    fs.realpathSync = original;
+    dispose(root);
+    dispose(outside);
+  }
 });

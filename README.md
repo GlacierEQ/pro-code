@@ -1,5 +1,8 @@
 # Pro-Code · Governed Local Engineering Operator
 
+**Double Helix engineering family:** [Public executable entry](DUALITY.md) ↔ [private canonical `Pro_Code` head](https://github.com/GlacierEQ/Pro_Code/blob/main/DUALITY.md). The existing runtime remains the implementation and verification source; private doctrine is loaded only with authorized GitHub access. No private corpus is mirrored into this repository.
+
+
 **A local engineering operator that distinguishes executable operations, declared roles, failed attempts and actually verified results.** It pairs a React/TypeScript cockpit with a dependency-free Node "Nexus" runtime, fail-closed worker dispatch, idempotent receipts, automatic workspace intelligence, and native verification in Rust and Haskell.
 
 [![Pro-Code native verification](https://github.com/GlacierEQ/pro-code/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/GlacierEQ/pro-code/actions/workflows/ci.yml)
@@ -9,10 +12,30 @@
 
 Built by [Casey Barton](https://casey-barton-glaciereq.vercel.app), forward-deployed AI engineer · [LinkedIn](https://www.linkedin.com/in/caseybartonai) · part of the [Job-App Helix](https://github.com/GlacierEQ/job-app-helix) portfolio.
 
+## Quick execution and family routing
+
+**This repository is the public executable strand**, paired with the private [`Pro_Code` engineering doctrine](https://github.com/GlacierEQ/Pro_Code/blob/main/DUALITY.md). Open [DUALITY.md](DUALITY.md) to recover the whole relevant engineering mission; if the private source is inaccessible, use the public runtime without inventing private context.
+
+```bash
+npm ci
+npm run lint && npm run typecheck
+npm test
+npm run build
+npm run code:complete -- --file src/workers.ts --line 1 --column 1 --limit 25
+npm run code:knowledge -- --symbol workersManager --definition-file src/workers.ts
+# Refactoring requires a real identifier position; see the read-only preview below.
+```
+
+Core source routes: [package.json](package.json) · [Node runtime](server/nexus.mjs) · [code intelligence](scripts/code-intelligence.mjs) · [completion](scripts/code-completion.mjs) · [refactoring](scripts/code-refactor.mjs) · [architecture](ARCHITECTURE.md) · [CI](https://github.com/GlacierEQ/pro-code/actions).
+
+**What is implemented:** compiler-backed coding CLI scripts, a bounded local Nexus runtime and workspace inventory, a React/TypeScript interface, and native tests in Node, Python, Rust and Haskell. **What is not implied:** a connected remote AI, live execution of every advertised worker role, production deployment or automatic cross-repository inheritance. The runtime explicitly distinguishes declared capabilities from supported handlers.
+
+Recent CI checks have succeeded on `main`, but each new commit needs its own verification. See the live checks above; [DUALITY](DUALITY.md) is an entrypoint, not a substitute for a passing end-to-end test.
+
 ## What this proves
 
 - **Bounded local dispatch, enforced in code.** The Nexus runtime ([`server/nexus.mjs`](server/nexus.mjs)) validates worker ownership, case/trace/task/idempotency identity, bounded constraints, and explicit acknowledgement before it reports success. Anything else fails closed.
-- **Single-process replay handling.** An identical replay returns the original receipt (`X-Idempotent-Replay: true`). Reusing a key with a different envelope is rejected with `409`. Both cases are tested in `server/nexus.test.mjs`.
+- **Bounded single-process replay handling.** An identical recent replay returns the original receipt (`X-Idempotent-Replay: true`). Reusing a retained key with a different envelope is rejected with `409`. The 500 most recently used completed keys are cached; in-flight entries are preserved. Older keys may execute again after eviction. This is not a durable deduplication guarantee across restarts, processes, or eviction. All cases are tested in `server/nexus.test.mjs`.
 - **Polyglot native verification.** Each layer is tested in its own language on every push: TypeScript/React (Vitest), Node runtime (`node --test`), Python repository contracts (`unittest`), a Rust call-depth governor, and Haskell AST validity invariants.
 - **Security and contract gates in CI.** Four workflows run on `main`: native verification, Nervous System Contract, Helix Verify, and CodeQL.
 - **One implemented worker action: `inventoryWorkspace`.** A bounded recursive inventory produces SHA-256 hashes where policy permits, exact duplicate groups, change deltas, category summaries, and evidence-ranked candidates. Unrelated declared capabilities (AI inference, legal analysis, motion generation, etc.) return `501 unsupported` rather than treating the inventory as their completed work.
@@ -65,11 +88,11 @@ npm run code:inspect -- --impact src/workers.ts --out .pro-code/runtime/impact.j
 npm run test:code-intelligence
 ```
 
-This resolves static/re-export, literal dynamic imports and CommonJS `require()` / `require.resolve()` dependency edges using TypeScript's compiler API. It enumerates module exports, reports actual compiler diagnostics and unresolved imports, and computes transitive reverse dependencies for the requested file. The report is machine-readable JSON with exact file paths, counts, limitations and compiler version. Nonliteral module paths are explicitly unknown, and unresolved references cause `scope.analysis_complete` to be `false`. Use `--fail-on-incomplete` to return a nonzero exit code for incomplete dependency graphs (in addition to `--fail-on-diagnostics` for compiler errors); a JSON report is still written for investigation. Files outside the configured TypeScript project are not silently counted as analyzed. CommonJS call recognition is syntax-based and may also observe locally shadowed `require` identifiers. This is a developer/CI tool using the existing TypeScript dev dependency, not a deployed Nexus worker or a claim that every language is analyzed.
+This resolves static/re-export, literal dynamic imports and CommonJS `require()` / `require.resolve()` dependency edges using TypeScript's compiler API. New explainable impact reports list direct dependents and deterministic shortest paths to all transitively affected files; compiler symbol binding checks exclude local functions and parameters named `require`. It enumerates module exports, reports actual compiler diagnostics and unresolved imports, and computes transitive reverse dependencies for the requested file. The report is machine-readable JSON with exact file paths, counts, limitations and compiler version. Nonliteral module paths are explicitly unknown, and unresolved references cause `scope.analysis_complete` to be `false`. Use `--fail-on-incomplete` to return a nonzero exit code for incomplete dependency graphs (in addition to `--fail-on-diagnostics` for compiler errors); a JSON report is still written for investigation. Files outside the configured TypeScript project are not silently counted as analyzed. Ambient/global `require` references remain statically analyzed; real runtime module-loader behavior is not proven. This is a developer/CI tool using the existing TypeScript dev dependency, not a deployed Nexus worker or a claim that every language is analyzed.
 
 ## Compiler-backed code completion
 
-The `code:complete` CLI uses the actual TypeScript language service and the project's `tsconfig.json`, including cross-file types and imported symbols. Suggestions are deterministic and machine-readable; no model calls, editor extension, file mutations, or autonomous patch claims are implied.
+The `code:complete` CLI uses the actual TypeScript language service and the project's `tsconfig.json`, including cross-file types and imported symbols. Suggestions are deterministic, machine-readable and **read-only**. It does not make model calls, apply patches, or certify a working editor integration.
 
 ```bash
 npm ci
@@ -77,7 +100,33 @@ npm run code:complete -- --file src/workers.ts --line 1 --column 1 --limit 25
 npm run test:code-completion
 ```
 
-Positions use **1-based lines and columns**. Pass `--root` and `--config` for a different project and `--prefix` to filter suggested names. Results include insertion text, replacement spans where offered, compiler version, and flags for snippets and completion entries requiring additional import/code actions. The command rejects target files outside the workspace, symlink escapes, excluded project files, invalid positions, and unbounded output. No result may be represented as a compiled or applied patch; import code actions need a proper editor/integration before insertion.
+To obtain compiler-derived signatures, documentation, import-edit previews and diagnostics:
+
+```bash
+npm run code:complete -- --file src/workers.ts --line 1 --column 1 --limit 25 --details --diagnostics
+```
+
+For a specific symbol, pass `--resolve-name` followed by an **actual candidate** returned in the completion list; optionally use `--resolve-source` to disambiguate duplicates. Missing or ambiguous candidates fail rather than returning fictional completions.
+
+Returned `resolution.code_actions[].changes` include workspace-relative paths and exact proposed edits. `safe_workspace_scope` marks changes outside the safe workspace; `requires_commands` identifies compiler commands **not executed**. The implementation checks project inclusion, realpath/symlink boundaries, position validity and bounded output. `--fail-on-diagnostics` emits the structured report and exits nonzero when compiler diagnostics exist.
+
+All positions are **1-based lines and columns**. `--root` and `--config` select another TypeScript project; `--prefix` filters suggestions. An import code action is a preview, not an applied patch; validate it with the compiler, tests and matching source revision before integration.
+
+## Executable compiler-aware refactoring
+
+`code:refactor` adds actual cross-file TypeScript symbol renames to the existing completion, compiler-inspection, and symbol-knowledge tools. It uses TypeScript's rename locations, not text search; unrelated same-spelling local symbols stay untouched.
+
+```bash
+# Read-only plan, with exact source/output SHA-256 and per-file edits
+npm run code:refactor -- --file src/workers.ts --line 1 --column 1 --new-name replacementName
+
+# Apply only when explicitly requested
+npm run code:refactor -- --file src/workers.ts --line 1 --column 1 --new-name replacementName --apply
+
+npm run test:code-refactor
+```
+
+The selected cursor must point to a renameable identifier, using 1-based line/column coordinates. Preview never writes. The engine rejects files outside the configured TypeScript project or the workspace, realpath escapes, invalid identifiers, overlapping edits, change-bound overruns, and renames that introduce new compiler diagnostics. Each affected file must still match the preview's observed SHA-256 before any write; the apply step uses same-directory atomic file replacements and verifies readback hashes. A later write failure triggers best-effort rollback of already changed files. **This is not a crash-safe multi-file transaction**: interruption between writes can leave partial changes, so use Git and CI for durable rollback/recovery. The tool does not perform GitHub pushes or bypass connector consent.
 
 ## Run it
 
@@ -177,11 +226,19 @@ The TypeScript worker layer and local Nexus enforce a fail-closed request shape 
 - external-action prohibition for the local contract;
 - explicit acknowledgement before success.
 
+### Local browser-origin boundary
+
+Nexus no longer returns wildcard `Access-Control-Allow-Origin: *`. By default it accepts browser origins only when both the browser origin and requested Host are loopback (`localhost`, `127.0.0.1`, or `[::1]`). Local development ports may differ. Foreign browser origins, opaque `null` origins and requests explicitly marked `Sec-Fetch-Site: cross-site` without an allowed origin are rejected with HTTP 403 before dispatch or context mutation.
+
+For an intentional non-loopback browser client, configure exact allowed origins using comma-separated `PRO_CODE_ALLOWED_ORIGINS` values, for example `https://operator.example`. This is **browser-origin isolation, not authentication**: direct HTTP clients without an Origin header can still make requests. Keep the service loopback-only unless a trusted authentication and network boundary is separately deployed and verified. The runtime does not trust proxy-supplied forwarding headers to infer origin.
+
 Transport credentials remain outside the serialized browser request envelope. A future authenticated deployment must supply its own trusted authorization/signature boundary and receipts.
 
 ### 4. Memory boundary
 
 Browser memory remains local. The Nexus runtime can persist a memory snapshot to Aspen- or Gemini-named filesystem targets **only when the corresponding local directory environment variable is explicitly configured**. An unconfigured target returns `unsupported`; this is not a claim of live Aspen Grove or Gemini service integration.
+
+Filesystem snapshot writes now use a unique private temporary file per request and atomic rename. Concurrent attempts no longer share a PID-named temporary filename; failed writes clean up their temporary file. Individual successful renames do **not** imply a multi-writer merge, cross-machine sync or persistence after a crash: concurrent writers retain last-writer-wins semantics.
 
 ### 5. Native policy boundaries
 

@@ -42,16 +42,16 @@ export async function queryCodeKnowledge({
 } = {}) {
   if (typeof symbol !== 'string' || !symbol.trim()) throw new Error('A nonempty --symbol is required');
   const workspace = canonicalWorkspace(root);
-  const configuration = canonicalFile(workspace, config, 'tsconfig');
   const chosenFile = definitionFile === null ? null : inside(workspace, canonicalFile(workspace, definitionFile, 'Definition file'));
 
-  // Reuse the existing compiler-backed diagnostics and dependency-impact engine.
-  const analysis = await analyzeCodebase({ root: workspace, config, impact });
-  const loaded = ts.readConfigFile(configuration, ts.sys.readFile);
-  if (loaded.error) throw new Error(ts.flattenDiagnosticMessageText(loaded.error.messageText, '\n'));
-  const parsed = ts.parseJsonConfigFileContent(loaded.config, ts.sys, path.dirname(configuration), undefined, configuration);
-  if (parsed.errors.length) throw new Error(parsed.errors.map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n')).join('; '));
-  const program = ts.createProgram({ rootNames: parsed.fileNames, options: parsed.options, projectReferences: parsed.projectReferences });
+  // The analysis pass already creates a TypeScript Program; share its exact snapshot.
+  // A second createProgram would re-read, parse, and type-check the same project.
+  let program = null;
+  const analysis = await analyzeCodebase({
+    root: workspace, config, impact,
+    onProgram: compiled => { program = compiled; },
+  });
+  if (!program) throw new Error('Compiler analysis did not produce a TypeScript program');
   const checker = program.getTypeChecker();
   const sourceFiles = program.getSourceFiles().filter(file =>
     !file.isDeclarationFile && inside(workspace, file.fileName) && !slash(file.fileName).includes('/node_modules/'));

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { resolveCompletion, safeWorkspacePath } from './code-completion-resolve.mjs';
 
 const within = (root, target) => {
   const relative = path.relative(root, target);
@@ -10,19 +11,21 @@ const within = (root, target) => {
 const unix = value => value.split(path.sep).join('/');
 
 function workspaceRelative(root, filename) {
-  const absolute = path.resolve(filename);
-  return within(root, absolute) ? unix(path.relative(root, absolute)) : null;
+  return safeWorkspacePath(root, filename);
 }
 
 function completionActions(root, detail) {
   return (detail?.codeActions ?? []).map(action => ({
     description: action.description,
-    changes: action.changes.map(change => {
+    requires_commands: Boolean(action.commands?.length),
+    safe_workspace_scope: (action.changes ?? []).every(change => workspaceRelative(root, change.fileName) !== null),
+    changes: (action.changes ?? []).map(change => {
       const file = workspaceRelative(root, change.fileName);
       return {
         file,
         within_workspace: file !== null,
-        edits: file === null ? [] : change.textChanges.map(edit => ({
+        is_new_file: Boolean(change.isNewFile),
+        edits: file === null ? [] : (change.textChanges ?? []).map(edit => ({
           span: edit.span, new_text: edit.newText,
         })),
       };
@@ -43,7 +46,8 @@ function localFile(root, requested, label) {
 /** Read-only compiler-backed completions in a real configured TS/JS project. */
 export function completeCode({
   root = process.cwd(), config = 'tsconfig.json', file, line, column,
-  limit = 40, prefix = '', content, autoPrefix = false, includeDetails = false,
+  limit = 40, prefix = '', content, autoPrefix = false, includeDetails = false, includeDiagnostics = false,
+  resolveName = null, resolveSource = null,
 } = {}) {
   const workspace = fs.realpathSync(path.resolve(root));
   if (!fs.statSync(workspace).isDirectory()) throw new Error('workspace must be a directory');
@@ -54,8 +58,9 @@ export function completeCode({
   }
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('limit must be an integer from 1 to 100');
   if (typeof prefix !== 'string' || prefix.length > 128) throw new Error('prefix must be at most 128 characters');
-  if (typeof autoPrefix !== 'boolean' || typeof includeDetails !== 'boolean') {
-    throw new Error('autoPrefix and includeDetails must be booleans');
+  if (resolveSource !== null && resolveName === null) throw new Error('resolve-source requires resolve-name');
+  if (typeof autoPrefix !== 'boolean' || typeof includeDetails !== 'boolean' || typeof includeDiagnostics !== 'boolean') {
+    throw new Error('autoPrefix, includeDetails and includeDiagnostics must be booleans');
   }
   if (content !== undefined && (typeof content !== 'string' || Buffer.byteLength(content, 'utf8') > 2_097_152)) {
     throw new Error('content must be a UTF-8 string of at most 2 MiB');
@@ -69,13 +74,27 @@ export function completeCode({
     throw new Error('target file is not included in the TypeScript project');
   }
 
-  // The file can change after path validation. Verify the canonical target again
-  // immediately before reading, and never follow a newly swapped external link.
+  // Verify canonical scope at the moment of access; the editor path can
+  // change after its initial validation during TypeScript project discovery.
   const currentTarget = fs.realpathSync(target);
   if (!within(workspace, currentTarget) || currentTarget !== target) {
     throw new Error('target file changed or resolves outside workspace');
   }
-  const diskContent = fs.readFileSync(target, 'utf8');
+  // Keep the opened file descriptor rather than following the pathname again
+  // during the read. O_NOFOLLOW rejects a final-component symlink swap; inode
+  // identity detects replacement between stat and open.
+  const beforeOpen = fs.statSync(target);
+  const handle = fs.openSync(target, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+  let diskContent;
+  try {
+    const opened = fs.fstatSync(handle);
+    if (!opened.isFile() || opened.dev !== beforeOpen.dev || opened.ino !== beforeOpen.ino) {
+      throw new Error('target file changed between validation and open');
+    }
+    diskContent = fs.readFileSync(handle, 'utf8');
+  } finally {
+    fs.closeSync(handle);
+  }
   const source = content === undefined ? diskContent : content;
   const starts = [0];
   for (let i = 0; i < source.length; i++) if (source[i] === '\n') starts.push(i + 1);
@@ -135,11 +154,28 @@ export function completeCode({
           documentation: ts.displayPartsToString(detail?.documentation ?? []),
           tags: (detail?.tags ?? []).map(tag => ({ name: tag.name, text: ts.displayPartsToString(tag.text ?? []) })),
           code_actions: completionActions(workspace, detail),
+          action_resolved: !entry.hasAction || Boolean(detail?.codeActions?.length),
         } : {}),
       };
     });
+    const diagnostics = includeDiagnostics
+      ? [...service.getSyntacticDiagnostics(target), ...service.getSemanticDiagnostics(target)].map(d => {
+        const where = d.file && Number.isInteger(d.start) ? d.file.getLineAndCharacterOfPosition(d.start) : null;
+        return {
+          code: d.code,
+          category: ts.DiagnosticCategory[d.category].toLowerCase(),
+          message: ts.flattenDiagnosticMessageText(d.messageText, '\n'),
+          line: where ? where.line + 1 : null,
+          column: where ? where.character + 1 : null,
+        };
+      }).sort((left, right) => (left.line ?? 0) - (right.line ?? 0)
+        || (left.column ?? 0) - (right.column ?? 0) || left.code - right.code)
+      : null;
+    const resolution = resolveName === null ? null : resolveCompletion({
+      service, workspace, file: target, position, entries: matches, name: resolveName, source: resolveSource,
+    });
     return {
-      schema_version: '1.0.0',
+      schema_version: '1.1.0',
       operation: 'typescript_language_service_completion',
       file: unix(path.relative(workspace, target)),
       cursor: { line, column, offset: position },
@@ -148,16 +184,22 @@ export function completeCode({
       is_dirty: content !== undefined && content !== diskContent,
       prefix_used: inferredPrefix,
       details_included: includeDetails,
+      diagnostic_count: includeDiagnostics ? diagnostics.length : null,
       total_matching: matches.length,
       returned: entries.length,
       is_incomplete: result?.isIncomplete ?? false,
       entries,
+      ...(resolution === null ? {} : { resolution }),
+      ...(includeDiagnostics ? { diagnostics } : {}),
       limitations: [
         'Suggestions and suggested code actions are read-only; no source files are modified.',
         'Editor-buffer completions use a transient unsaved snapshot of the target file; other project files are read from disk.',
-        'Code actions may require coordinated edits; actions targeting files outside the workspace are disclosed without edit text.',
+        'Code actions are read-only proposals requiring editor-revision checks and atomic application of every affected edit.',
+        'Actions targeting outside-workspace symlinks or paths are disclosed without edit text.',
         'An entry requiring a code action may also need import edits and must not be inserted alone.',
         'Completions reflect configured TypeScript/JavaScript project symbols, not AI-generated implementations or validated patches.',
+        'Use --resolve-name to retrieve compiler documentation and complete import edit previews; code actions are not applied.',
+        'Compiler code action commands are not executed; cross-workspace edits are suppressed.',
       ],
     };
   } finally {
@@ -166,25 +208,31 @@ export function completeCode({
 }
 
 function parseCli(args) {
-  const values = { root: process.cwd(), config: 'tsconfig.json', limit: 40, prefix: '', autoPrefix: false, includeDetails: false };
-  const supported = new Set(['root', 'config', 'file', 'line', 'column', 'limit', 'prefix']);
+  const values = { root: process.cwd(), config: 'tsconfig.json', limit: 40, prefix: '', autoPrefix: false, includeDetails: false, includeDiagnostics: false, resolveName: null, resolveSource: null };
+  const supported = new Set(['root', 'config', 'file', 'line', 'column', 'limit', 'prefix', 'resolve-name', 'resolve-source']);
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
     if (flag === '--auto-prefix') { values.autoPrefix = true; continue; }
     if (flag === '--details') { values.includeDetails = true; continue; }
+    if (flag === '--diagnostics') { values.includeDiagnostics = true; continue; }
+    if (flag === '--fail-on-diagnostics') { values.includeDiagnostics = true; values.failOnDiagnostics = true; continue; }
     if (flag === '--content-stdin') { values.content = fs.readFileSync(0, 'utf8'); continue; }
     const name = flag.startsWith('--') ? flag.slice(2) : '';
     if (!supported.has(name)) throw new Error(`Unknown argument: ${flag}`);
     if (i + 1 >= args.length || args[i + 1].startsWith('--')) throw new Error(`${flag} requires a value`);
     const value = args[++i];
-    values[name] = ['line', 'column', 'limit'].includes(name) ? Number(value) : value;
+    const key = name === 'resolve-name' ? 'resolveName' : name === 'resolve-source' ? 'resolveSource' : name;
+    values[key] = ['line', 'column', 'limit'].includes(name) ? Number(value) : value;
   }
   return values;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   try {
-    process.stdout.write(`${JSON.stringify(completeCode(parseCli(process.argv.slice(2))), null, 2)}\n`);
+    const options = parseCli(process.argv.slice(2));
+    const report = completeCode(options);
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    if (options.failOnDiagnostics && report.diagnostic_count > 0) process.exitCode = 1;
   } catch (error) {
     process.stderr.write(`code-completion: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;
