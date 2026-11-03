@@ -1,6 +1,6 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, open, realpath, rename, stat, writeFile } from 'node:fs/promises';
+import { mkdir, open, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -208,11 +208,18 @@ async function persistMemory(target, entries, env, now) {
   if (!directory) return { status: 'unsupported', target, reason: `PRO_CODE_${target.toUpperCase()}_DIR is not configured` };
   await mkdir(directory, { recursive: true });
   const destination = path.join(directory, 'pro-code-memory.json');
-  const temporary = `${destination}.${process.pid}.tmp`;
+  // A unique private temp file avoids collisions between simultaneous writes
+  // in the same process. The final snapshot still uses last-writer-wins.
+  const temporary = `${destination}.${process.pid}.${randomUUID()}.tmp`;
   const snapshot = { schema_version: '1.0.0', source: 'pro-code', target, synced_at: now().toISOString(), entries };
   const content = `${JSON.stringify(snapshot, null, 2)}\n`;
-  await writeFile(temporary, content, { encoding: 'utf8', mode: 0o600 });
-  await rename(temporary, destination);
+  try {
+    await writeFile(temporary, content, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    await rename(temporary, destination);
+  } catch (error) {
+    await unlink(temporary).catch(() => {});
+    throw error;
+  }
   return {
     status: 'completed', target, path: destination, records_confirmed: entries.length,
     content_digest: createHash('sha256').update(content).digest('hex'), completed_at: snapshot.synced_at,
