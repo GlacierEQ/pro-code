@@ -291,7 +291,7 @@ test('CLI resolves a selected suggestion and rejects nonexistent resolution name
 });
 
 test('rejects a post-validation symlink swap before reading editor disk', () => {
-  const root = fixture({ 'main.ts': 'const alpha = 1;\\nal' });
+  const root = fixture({ 'main.ts': 'const alpha = 1;\nal' });
   const outside = mkdtempSync(path.join(tmpdir(), 'pro-code-completion-outside-'));
   const target = path.join(root, 'src', 'main.ts');
   const secret = path.join(outside, 'secret.ts');
