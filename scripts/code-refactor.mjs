@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { commitGuardedFiles } from './refactor-transaction.mjs';
 
 const digest = data => crypto.createHash('sha256').update(data).digest('hex');
 const slash = value => value.split(path.sep).join('/');
@@ -141,9 +142,13 @@ export function planCodeRename({ root = process.cwd(), config = 'tsconfig.json',
 
 /** Commit a plan only if every file still matches its observed SHA. Roll back on partial failures. */
 export function applyCodeRename(plan, { beforeWrite } = {}) {
-  if (!plan || plan.operation !== 'typescript_safe_rename' || plan.mode !== 'preview' || !Array.isArray(plan.changed_files)) throw new Error('invalid rename plan');
+  if (!plan || plan.operation !== 'typescript_safe_rename' || plan.mode !== 'preview' || !Array.isArray(plan.changed_files))
+    throw new Error('invalid rename plan');
   const root = fs.realpathSync(plan.workspace);
-  const originals = new Map();
+  const expectedIdentity = digest(JSON.stringify({
+    root, symbol: plan.symbol, name: plan.new_name, files: plan.changed_files,
+  }));
+  if (expectedIdentity !== plan.plan_sha256) throw new Error('rename plan changed after preview');
   const prepared = [];
   for (const change of plan.changed_files) {
     const absolute = secureFile(root, change.path, 'changed file');
@@ -155,33 +160,9 @@ export function applyCodeRename(plan, { beforeWrite } = {}) {
       content = content.slice(0, offset) + after + content.slice(offset + before.length);
     }
     if (digest(content) !== change.after_sha256) throw new Error('planned content digest mismatch');
-    originals.set(absolute, original);
-    prepared.push({ absolute, relative: change.path, content });
+    prepared.push({ relative: change.path, original, content, expectedAfter: change.after_sha256 });
   }
-  const written = [];
-  const atomicWrite = (filename, data) => {
-    const temporary = `${filename}.pro-code-${crypto.randomBytes(8).toString('hex')}.tmp`;
-    try {
-      fs.writeFileSync(temporary, data, { flag: 'wx', mode: fs.statSync(filename).mode });
-      fs.renameSync(temporary, filename);
-    } finally { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); }
-  };
-  try {
-    for (const item of prepared) {
-      if (beforeWrite) beforeWrite(item.relative, written.length);
-      if (digest(fs.readFileSync(item.absolute, 'utf8')) !== digest(originals.get(item.absolute))) throw new Error(`concurrent source mutation: ${item.relative}`);
-      written.push(item.absolute);
-      atomicWrite(item.absolute, item.content);
-      if (digest(fs.readFileSync(item.absolute)) !== digest(item.content)) throw new Error(`readback mismatch: ${item.relative}`);
-    }
-  } catch (failure) {
-    const rollbackErrors = [];
-    for (const item of written.reverse()) {
-      try { atomicWrite(item, originals.get(item)); } catch (error) { rollbackErrors.push(`${item}: ${error.message}`); }
-    }
-    const reason = failure instanceof Error ? failure.message : String(failure);
-    throw new Error(`rename failed: ${reason}; rollback_errors=${JSON.stringify(rollbackErrors)}`);
-  }
+  commitGuardedFiles({ root, files: prepared, beforeWrite });
   return { ...plan, mode: 'applied', readback_verified: true };
 }
 

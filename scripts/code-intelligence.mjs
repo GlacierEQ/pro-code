@@ -74,7 +74,7 @@ function sourceImports(sourceFile, checker) {
   return imports;
 }
 
-export async function analyzeCodebase({ root = process.cwd(), config = 'tsconfig.json', impact = null } = {}) {
+export async function analyzeCodebase({ root = process.cwd(), config = 'tsconfig.json', impact = null, onProgram = null } = {}) {
   const workspaceRoot = canonicalWorkspace(root);
   const configuration = canonicalFile(workspaceRoot, config, 'tsconfig');
   const loaded = ts.readConfigFile(configuration, ts.sys.readFile);
@@ -83,6 +83,11 @@ export async function analyzeCodebase({ root = process.cwd(), config = 'tsconfig
   if (parsed.errors.length) throw new Error(parsed.errors.map(d => ts.flattenDiagnosticMessageText(d.messageText, '\n')).join('; '));
   if (!parsed.fileNames.length) throw new Error('TypeScript configuration contains no source files');
   const program = ts.createProgram({ rootNames: parsed.fileNames, options: parsed.options, projectReferences: parsed.projectReferences });
+  // Allow companion tools to use this exact compiler snapshot instead of rebuilding it.
+  if (onProgram !== null) {
+    if (typeof onProgram !== 'function') throw new Error('onProgram must be a function');
+    onProgram(program);
+  }
   const checker = program.getTypeChecker();
   const sourceFiles = program.getSourceFiles().filter(file => {
     if (file.isDeclarationFile || relativeWithin(workspaceRoot, file.fileName) === null || normalize(file.fileName).includes('/node_modules/')) return false;

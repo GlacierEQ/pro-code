@@ -1,5 +1,8 @@
 # Pro-Code · Governed Local Engineering Operator
 
+**Double Helix engineering family:** [Public executable entry](DUALITY.md) ↔ [private canonical `Pro_Code` head](https://github.com/GlacierEQ/Pro_Code/blob/main/DUALITY.md). The existing runtime remains the implementation and verification source; private doctrine is loaded only with authorized GitHub access. No private corpus is mirrored into this repository.
+
+
 **A local engineering operator that distinguishes executable operations, declared roles, failed attempts and actually verified results.** It pairs a React/TypeScript cockpit with a dependency-free Node "Nexus" runtime, fail-closed worker dispatch, idempotent receipts, automatic workspace intelligence, and native verification in Rust and Haskell.
 
 [![Pro-Code native verification](https://github.com/GlacierEQ/pro-code/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/GlacierEQ/pro-code/actions/workflows/ci.yml)
@@ -8,6 +11,26 @@
 [![CodeQL](https://github.com/GlacierEQ/pro-code/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/GlacierEQ/pro-code/actions/workflows/codeql.yml)
 
 Built by [Casey Barton](https://casey-barton-glaciereq.vercel.app), forward-deployed AI engineer · [LinkedIn](https://www.linkedin.com/in/caseybartonai) · part of the [Job-App Helix](https://github.com/GlacierEQ/job-app-helix) portfolio.
+
+## Quick execution and family routing
+
+**This repository is the public executable strand**, paired with the private [`Pro_Code` engineering doctrine](https://github.com/GlacierEQ/Pro_Code/blob/main/DUALITY.md). Open [DUALITY.md](DUALITY.md) to recover the whole relevant engineering mission; if the private source is inaccessible, use the public runtime without inventing private context.
+
+```bash
+npm ci
+npm run lint && npm run typecheck
+npm test
+npm run build
+npm run code:complete -- --file src/workers.ts --line 1 --column 1 --limit 25
+npm run code:knowledge -- --symbol workersManager --definition-file src/workers.ts
+# Refactoring requires a real identifier position; see the read-only preview below.
+```
+
+Core source routes: [package.json](package.json) · [Node runtime](server/nexus.mjs) · [code intelligence](scripts/code-intelligence.mjs) · [completion](scripts/code-completion.mjs) · [refactoring](scripts/code-refactor.mjs) · [architecture](ARCHITECTURE.md) · [CI](https://github.com/GlacierEQ/pro-code/actions).
+
+**What is implemented:** compiler-backed coding CLI scripts, a bounded local Nexus runtime and workspace inventory, a React/TypeScript interface, and native tests in Node, Python, Rust and Haskell. **What is not implied:** a connected remote AI, live execution of every advertised worker role, production deployment or automatic cross-repository inheritance. The runtime explicitly distinguishes declared capabilities from supported handlers.
+
+Recent CI checks have succeeded on `main`, but each new commit needs its own verification. See the live checks above; [DUALITY](DUALITY.md) is an entrypoint, not a substitute for a passing end-to-end test.
 
 ## What this proves
 
@@ -69,7 +92,7 @@ This resolves static/re-export, literal dynamic imports and CommonJS `require()`
 
 ## Compiler-backed code completion
 
-The `code:complete` CLI uses the actual TypeScript language service and the project's `tsconfig.json`, including cross-file types and imported symbols. Suggestions are deterministic and machine-readable; no model calls, editor extension, file mutations, or autonomous patch claims are implied.
+The `code:complete` CLI uses the actual TypeScript language service and the project's `tsconfig.json`, including cross-file types and imported symbols. Suggestions are deterministic, machine-readable and **read-only**. It does not make model calls, apply patches, or certify a working editor integration.
 
 ```bash
 npm ci
@@ -77,18 +100,17 @@ npm run code:complete -- --file src/workers.ts --line 1 --column 1 --limit 25
 npm run test:code-completion
 ```
 
-
-### Compiler-resolved completion details and diagnostics
-
-Use the opt-in TypeScript language-service details when a suggestion needs an import, and include syntax/semantic diagnostics for the target file:
+To obtain compiler-derived signatures, documentation, import-edit previews and diagnostics:
 
 ```bash
 npm run code:complete -- --file src/workers.ts --line 1 --column 1 --limit 25 --details --diagnostics
 ```
 
-`--details` asks TypeScript for symbol information, documentation and **real compiler-proposed code actions** (including auto-import text changes, file-relative paths and exact spans). It does **not** apply those edits, install packages, or certify the result. Text changes outside the resolved workspace are not surfaced. `--diagnostics` adds compiler syntax and semantic diagnostics with error codes and 1-based locations. Both switches are optional to keep ordinary completion fast. `--fail-on-diagnostics` also emits the machine-readable report, then exits nonzero if the active source/editor buffer contains diagnostics. Code actions report `safe_workspace_scope` and reject symlink escapes; they remain read-only proposals to apply against an exact matching editor revision. Validate edits with the compiler, tests and repository CI before using them in production.
+For a specific symbol, pass `--resolve-name` followed by an **actual candidate** returned in the completion list; optionally use `--resolve-source` to disambiguate duplicates. Missing or ambiguous candidates fail rather than returning fictional completions.
 
-Positions use **1-based lines and columns**. Pass `--root` and `--config` for a different project and `--prefix` to filter suggested names. Results include insertion text, replacement spans where offered, compiler version, and flags for snippets and completion entries requiring additional import/code actions. The command rejects target files outside the workspace, symlink escapes, excluded project files, invalid positions, and unbounded output. No result may be represented as a compiled or applied patch; import code actions need a proper editor/integration before insertion.
+Returned `resolution.code_actions[].changes` include workspace-relative paths and exact proposed edits. `safe_workspace_scope` marks changes outside the safe workspace; `requires_commands` identifies compiler commands **not executed**. The implementation checks project inclusion, realpath/symlink boundaries, position validity and bounded output. `--fail-on-diagnostics` emits the structured report and exits nonzero when compiler diagnostics exist.
+
+All positions are **1-based lines and columns**. `--root` and `--config` select another TypeScript project; `--prefix` filters suggestions. An import code action is a preview, not an applied patch; validate it with the compiler, tests and matching source revision before integration.
 
 ## Executable compiler-aware refactoring
 
@@ -216,7 +238,7 @@ Transport credentials remain outside the serialized browser request envelope. A 
 
 Browser memory remains local. The Nexus runtime can persist a memory snapshot to Aspen- or Gemini-named filesystem targets **only when the corresponding local directory environment variable is explicitly configured**. An unconfigured target returns `unsupported`; this is not a claim of live Aspen Grove or Gemini service integration.
 
-Filesystem snapshot writes use a unique, owner-private temporary file per request followed by an atomic rename. Concurrent writers no longer collide on a shared PID-named temp file; unsuccessful attempts clean their temp file. A successful write only confirms that **that** rename succeeded: competing concurrent writers may later replace the snapshot, so there is no multi-writer transaction/merge or durable cross-machine sync guarantee.
+Filesystem snapshot writes now use a unique private temporary file per request and atomic rename. Concurrent attempts no longer share a PID-named temporary filename; failed writes clean up their temporary file. Individual successful renames do **not** imply a multi-writer merge, cross-machine sync or persistence after a crash: concurrent writers retain last-writer-wins semantics.
 
 ### 5. Native policy boundaries
 

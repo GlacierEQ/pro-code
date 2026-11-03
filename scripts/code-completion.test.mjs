@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { completeCode } from './code-completion.mjs';
+import { resolveCompletion } from './code-completion-resolve.mjs';
 
 function fixture(files) {
   const root = mkdtempSync(path.join(tmpdir(), 'pro-code-completion-'));
@@ -217,5 +218,73 @@ test('diagnostic exit mode keeps JSON and validates unsaved editor buffers witho
     assert.equal(run.status, 1);
     assert.ok(JSON.parse(run.stdout).diagnostic_count > 0);
     assert.equal(readFileSync(path.join(root, 'src/main.ts'), 'utf8'), 'const count: number = 12;\ncount');
+  } finally { dispose(root); }
+});
+
+test('resolves compiler documentation and complete auto-import edits without writing files', () => {
+  const source = 'addVal';
+  const root = fixture({
+    'helpers.ts': '/** Adds two values together. */\nexport function addValues(a: number, b: number) { return a + b; }\n',
+    'main.ts': source,
+  });
+  try {
+    const result = completeCode({ root, file: 'src/main.ts', line: 1, column: 7, resolveName: 'addValues' });
+    assert.equal(result.schema_version, '1.1.0');
+    assert.equal(result.resolution.name, 'addValues');
+    assert.match(result.resolution.display, /addValues/);
+    assert.match(result.resolution.documentation, /Adds two values together/);
+    const action = result.resolution.code_actions.find(x => /import/i.test(x.description));
+    assert.ok(action, 'TypeScript must provide an import code action');
+    assert.equal(action.within_workspace, true);
+    assert.equal(action.requires_commands, false);
+    assert.equal(action.changes[0].file, 'src/main.ts');
+    assert.match(action.changes[0].text_changes[0].new_text, /import.*addValues.*helpers/);
+    assert.equal(readFileSync(path.join(root, 'src/main.ts'), 'utf8'), source);
+  } finally { dispose(root); }
+});
+
+test('does not expose or claim a code action that escapes workspace through a symlink', () => {
+  const root = fixture({ 'main.ts': 'a' });
+  const outside = mkdtempSync(path.join(tmpdir(), 'pro-code-completion-edits-'));
+  writeFileSync(path.join(outside, 'outside.ts'), 'const secret = 1;');
+  symlinkSync(path.join(outside, 'outside.ts'), path.join(root, 'src', 'escaped.ts'));
+  try {
+    const service = { getCompletionEntryDetails: () => ({
+      kind: 'var', displayParts: [{ text: 'a', kind: 'text' }],
+      codeActions: [{ description: 'unsafe cross-workspace edit', changes: [
+        { fileName: path.join(root, 'src', 'escaped.ts'), textChanges: [{ span: { start: 0, length: 0 }, newText: 'LEAK' }] },
+      ] }],
+    }) };
+    const resolved = resolveCompletion({
+      service, workspace: root, file: path.join(root, 'src', 'main.ts'),
+      position: 1, entries: [{ name: 'a' }], name: 'a',
+    });
+    assert.equal(resolved.code_actions[0].within_workspace, false);
+    assert.deepEqual(resolved.code_actions[0].changes, []);
+    assert.equal(readFileSync(path.join(outside, 'outside.ts'), 'utf8'), 'const secret = 1;');
+  } finally { dispose(root); dispose(outside); }
+});
+
+test('rejects absent and ambiguous completion resolution, and malformed source selection', () => {
+  const root = fixture({ 'main.ts': 'alpha' });
+  try {
+    assert.throws(() => completeCode({ root, file: 'src/main.ts', line: 1, column: 6, resolveName: 'notActuallyHere' }), /not available/);
+    assert.throws(() => completeCode({ root, file: 'src/main.ts', line: 1, column: 6, resolveSource: 'wrong' }), /requires resolve-name/);
+    const service = { getCompletionEntryDetails: () => ({}) };
+    const base = { service, workspace: root, file: path.join(root, 'src', 'main.ts'), position: 5,
+      entries: [{ name: 'alpha', source: './one' }, { name: 'alpha', source: './two' }], name: 'alpha' };
+    assert.throws(() => resolveCompletion(base), /ambiguous/);
+    assert.equal(resolveCompletion({ ...base, source: './one' }).source, './one');
+  } finally { dispose(root); }
+});
+
+test('CLI resolves a selected suggestion and rejects nonexistent resolution names', async () => {
+  const root = fixture({ 'main.ts': 'const alpha = 1;\nal' });
+  const cli = fileURLToPath(new URL('./code-completion.mjs', import.meta.url));
+  try {
+    const args = [cli, '--root', root, '--file', 'src/main.ts', '--line', '2', '--column', '3'];
+    const { stdout } = await promisify(execFile)(process.execPath, [...args, '--resolve-name', 'alpha']);
+    assert.equal(JSON.parse(stdout).resolution.name, 'alpha');
+    await assert.rejects(promisify(execFile)(process.execPath, [...args, '--resolve-name', 'missingName']), /not available/);
   } finally { dispose(root); }
 });

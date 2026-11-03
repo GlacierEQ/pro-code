@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
+import { resolveCompletion, safeWorkspacePath } from './code-completion-resolve.mjs';
 
 const within = (root, target) => {
   const relative = path.relative(root, target);
@@ -10,20 +11,13 @@ const within = (root, target) => {
 const unix = value => value.split(path.sep).join('/');
 
 function workspaceRelative(root, filename) {
-  const absolute = path.resolve(filename);
-  if (!within(root, absolute)) return null;
-  try {
-    const resolved = fs.existsSync(absolute) ? fs.realpathSync(absolute)
-      : path.join(fs.realpathSync(path.dirname(absolute)), path.basename(absolute));
-    return within(root, resolved) ? unix(path.relative(root, resolved)) : null;
-  } catch {
-    return null;
-  }
+  return safeWorkspacePath(root, filename);
 }
 
 function completionActions(root, detail) {
   return (detail?.codeActions ?? []).map(action => ({
     description: action.description,
+    requires_commands: Boolean(action.commands?.length),
     safe_workspace_scope: (action.changes ?? []).every(change => workspaceRelative(root, change.fileName) !== null),
     changes: (action.changes ?? []).map(change => {
       const file = workspaceRelative(root, change.fileName);
@@ -53,6 +47,7 @@ function localFile(root, requested, label) {
 export function completeCode({
   root = process.cwd(), config = 'tsconfig.json', file, line, column,
   limit = 40, prefix = '', content, autoPrefix = false, includeDetails = false, includeDiagnostics = false,
+  resolveName = null, resolveSource = null,
 } = {}) {
   const workspace = fs.realpathSync(path.resolve(root));
   const configuration = localFile(workspace, config, 'tsconfig');
@@ -62,6 +57,7 @@ export function completeCode({
   }
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('limit must be an integer from 1 to 100');
   if (typeof prefix !== 'string' || prefix.length > 128) throw new Error('prefix must be at most 128 characters');
+  if (resolveSource !== null && resolveName === null) throw new Error('resolve-source requires resolve-name');
   if (typeof autoPrefix !== 'boolean' || typeof includeDetails !== 'boolean' || typeof includeDiagnostics !== 'boolean') {
     throw new Error('autoPrefix, includeDetails and includeDiagnostics must be booleans');
   }
@@ -154,8 +150,11 @@ export function completeCode({
       }).sort((left, right) => (left.line ?? 0) - (right.line ?? 0)
         || (left.column ?? 0) - (right.column ?? 0) || left.code - right.code)
       : null;
+    const resolution = resolveName === null ? null : resolveCompletion({
+      service, workspace, file: target, position, entries: matches, name: resolveName, source: resolveSource,
+    });
     return {
-      schema_version: '1.0.0',
+      schema_version: '1.1.0',
       operation: 'typescript_language_service_completion',
       file: unix(path.relative(workspace, target)),
       cursor: { line, column, offset: position },
@@ -169,6 +168,7 @@ export function completeCode({
       returned: entries.length,
       is_incomplete: result?.isIncomplete ?? false,
       entries,
+      ...(resolution === null ? {} : { resolution }),
       ...(includeDiagnostics ? { diagnostics } : {}),
       limitations: [
         'Suggestions and suggested code actions are read-only; no source files are modified.',
@@ -177,6 +177,8 @@ export function completeCode({
         'Actions targeting outside-workspace symlinks or paths are disclosed without edit text.',
         'An entry requiring a code action may also need import edits and must not be inserted alone.',
         'Completions reflect configured TypeScript/JavaScript project symbols, not AI-generated implementations or validated patches.',
+        'Use --resolve-name to retrieve compiler documentation and complete import edit previews; code actions are not applied.',
+        'Compiler code action commands are not executed; cross-workspace edits are suppressed.',
       ],
     };
   } finally {
@@ -185,8 +187,8 @@ export function completeCode({
 }
 
 function parseCli(args) {
-  const values = { root: process.cwd(), config: 'tsconfig.json', limit: 40, prefix: '', autoPrefix: false, includeDetails: false };
-  const supported = new Set(['root', 'config', 'file', 'line', 'column', 'limit', 'prefix']);
+  const values = { root: process.cwd(), config: 'tsconfig.json', limit: 40, prefix: '', autoPrefix: false, includeDetails: false, includeDiagnostics: false, resolveName: null, resolveSource: null };
+  const supported = new Set(['root', 'config', 'file', 'line', 'column', 'limit', 'prefix', 'resolve-name', 'resolve-source']);
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
     if (flag === '--auto-prefix') { values.autoPrefix = true; continue; }
@@ -198,7 +200,8 @@ function parseCli(args) {
     if (!supported.has(name)) throw new Error(`Unknown argument: ${flag}`);
     if (i + 1 >= args.length || args[i + 1].startsWith('--')) throw new Error(`${flag} requires a value`);
     const value = args[++i];
-    values[name] = ['line', 'column', 'limit'].includes(name) ? Number(value) : value;
+    const key = name === 'resolve-name' ? 'resolveName' : name === 'resolve-source' ? 'resolveSource' : name;
+    values[key] = ['line', 'column', 'limit'].includes(name) ? Number(value) : value;
   }
   return values;
 }

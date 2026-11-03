@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -446,6 +447,40 @@ test('active execution remains single-flight while completed cache is saturated'
   }
 });
 
+test('static serving reads canonical in-root files and SPA fallback without disclosing outside files', async () => {
+  const fixture = mkdtempSync(path.join(tmpdir(), 'pro-code-static-root-'));
+  const root = path.join(fixture, 'dist');
+  const outside = path.join(fixture, 'outside');
+  mkdirSync(root);
+  mkdirSync(outside);
+  writeFileSync(path.join(root, 'index.html'), '<h1>safe index</h1>');
+  writeFileSync(path.join(root, 'app.js'), 'console.log("safe");');
+  writeFileSync(path.join(outside, 'secret.txt'), 'SECRET-DO-NOT-SERVE');
+  symlinkSync(path.join(outside, 'secret.txt'), path.join(root, 'leak.txt'));
+  symlinkSync(outside, path.join(root, 'private'));
+  symlinkSync(path.join(root, 'app.js'), path.join(root, 'alias.js'));
+  const runtime = await startNexusServer({ host: '127.0.0.1', port: 0, staticRoot: root });
+  try {
+    const normal = await fetch(runtime.url + '/app.js');
+    assert.equal(normal.status, 200);
+    assert.equal(await normal.text(), 'console.log("safe");');
+    const alias = await fetch(runtime.url + '/alias.js');
+    assert.equal(alias.status, 200);
+    assert.equal(await alias.text(), 'console.log("safe");');
+    const fallback = await fetch(runtime.url + '/deep/link');
+    assert.equal(fallback.status, 200);
+    assert.equal(await fallback.text(), '<h1>safe index</h1>');
+    for (const filename of ['/leak.txt', '/private/secret.txt', '/%2f..%2foutside%2fsecret.txt']) {
+      const denied = await fetch(runtime.url + filename);
+      assert.equal(denied.status, 404, filename);
+      assert.doesNotMatch(await denied.text(), /SECRET-DO-NOT-SERVE|safe index/, filename);
+    }
+  } finally {
+    await new Promise((resolve, reject) => runtime.server.close(error => error ? reject(error) : resolve()));
+    rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
 test('parallel memory sync writes stay atomic without shared temporary-file races', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'pro-code-memory-atomic-'));
   const runtime = await startNexusServer({
@@ -473,8 +508,7 @@ test('parallel memory sync writes stay atomic without shared temporary-file race
     assert.equal(snapshot.entries.length, 1);
     assert.ok(Number.isInteger(snapshot.entries[0].writer));
     assert.ok(snapshot.entries[0].writer >= 0 && snapshot.entries[0].writer < 40);
-    const files = await readdir(directory);
-    assert.deepEqual(files, ['pro-code-memory.json'], 'temp files must not survive successful requests');
+    assert.deepEqual(await readdir(directory), ['pro-code-memory.json']);
     assert.equal((await stat(final)).mode & 0o777, 0o600);
   } finally {
     await new Promise((resolve, reject) => runtime.server.close(error => error ? reject(error) : resolve()));
