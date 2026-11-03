@@ -50,6 +50,7 @@ export function completeCode({
   resolveName = null, resolveSource = null,
 } = {}) {
   const workspace = fs.realpathSync(path.resolve(root));
+  if (!fs.statSync(workspace).isDirectory()) throw new Error('workspace must be a directory');
   const configuration = localFile(workspace, config, 'tsconfig');
   const target = localFile(workspace, file, 'target file');
   if (!Number.isSafeInteger(line) || line < 1 || !Number.isSafeInteger(column) || column < 1) {
@@ -73,7 +74,27 @@ export function completeCode({
     throw new Error('target file is not included in the TypeScript project');
   }
 
-  const diskContent = fs.readFileSync(target, 'utf8');
+  // Verify canonical scope at the moment of access; the editor path can
+  // change after its initial validation during TypeScript project discovery.
+  const currentTarget = fs.realpathSync(target);
+  if (!within(workspace, currentTarget) || currentTarget !== target) {
+    throw new Error('target file changed or resolves outside workspace');
+  }
+  // Keep the opened file descriptor rather than following the pathname again
+  // during the read. O_NOFOLLOW rejects a final-component symlink swap; inode
+  // identity detects replacement between stat and open.
+  const beforeOpen = fs.statSync(target);
+  const handle = fs.openSync(target, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+  let diskContent;
+  try {
+    const opened = fs.fstatSync(handle);
+    if (!opened.isFile() || opened.dev !== beforeOpen.dev || opened.ino !== beforeOpen.ino) {
+      throw new Error('target file changed between validation and open');
+    }
+    diskContent = fs.readFileSync(handle, 'utf8');
+  } finally {
+    fs.closeSync(handle);
+  }
   const source = content === undefined ? diskContent : content;
   const starts = [0];
   for (let i = 0; i < source.length; i++) if (source[i] === '\n') starts.push(i + 1);

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, symlinkSync, readFileSync } from 'node:fs';
+import fs from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, symlinkSync, unlinkSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -287,4 +288,35 @@ test('CLI resolves a selected suggestion and rejects nonexistent resolution name
     assert.equal(JSON.parse(stdout).resolution.name, 'alpha');
     await assert.rejects(promisify(execFile)(process.execPath, [...args, '--resolve-name', 'missingName']), /not available/);
   } finally { dispose(root); }
+});
+
+test('rejects a post-validation symlink swap before reading editor disk', () => {
+  const root = fixture({ 'main.ts': 'const alpha = 1;\nal' });
+  const outside = mkdtempSync(path.join(tmpdir(), 'pro-code-completion-outside-'));
+  const target = path.join(root, 'src', 'main.ts');
+  const secret = path.join(outside, 'secret.ts');
+  writeFileSync(secret, 'const secret = 1;');
+  const original = fs.realpathSync;
+  let targetChecks = 0;
+  let swapped = false;
+  try {
+    fs.realpathSync = function (filename, ...args) {
+      if (path.resolve(String(filename)) === target) {
+        targetChecks += 1;
+        if (targetChecks === 2) {
+          unlinkSync(target);
+          symlinkSync(secret, target);
+          swapped = true;
+        }
+      }
+      return original.call(this, filename, ...args);
+    };
+    assert.throws(() => completeCode({ root, file: 'src/main.ts', line: 2, column: 3 }),
+      /target file changed or resolves outside workspace/);
+    assert.equal(swapped, true, 'the race injection must actually occur');
+  } finally {
+    fs.realpathSync = original;
+    dispose(root);
+    dispose(outside);
+  }
 });
