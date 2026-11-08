@@ -23,7 +23,7 @@ function diagnosticKey(item, root) {
   const file = item.file ? slash(path.relative(root, item.file.fileName)) : '<project>';
   return [file, item.code, ts.flattenDiagnosticMessageText(item.messageText, '\n')].join('|');
 }
-function diagnose(program, root) {
+export function diagnose(program, root) {
   const counts = new Map();
   for (const d of ts.getPreEmitDiagnostics(program)) {
     const key = diagnosticKey(d, root);
@@ -31,12 +31,12 @@ function diagnose(program, root) {
   }
   return counts;
 }
-function additionalDiagnostics(previous, next) {
+export function additionalDiagnostics(previous, next) {
   const introduced = [];
   for (const [key, count] of next) if (count > (previous.get(key) ?? 0)) introduced.push({ diagnostic: key, added: count - (previous.get(key) ?? 0) });
   return introduced;
 }
-function createProject(root, config, replacements = new Map()) {
+export function createProject(root, config, replacements = new Map()) {
   const configPath = secureFile(root, config, 'tsconfig');
   const loaded = ts.readConfigFile(configPath, ts.sys.readFile);
   if (loaded.error) throw new Error(ts.flattenDiagnosticMessageText(loaded.error.messageText, '\n'));
