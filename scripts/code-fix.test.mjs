@@ -81,12 +81,12 @@ test('rejects invalid selection, outside workspace and symlinked project files',
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'pro-code-fix-outside-'));
   try {
     fs.writeFileSync(path.join(outside, 'secret.ts'), 'const secret = 1;');
-    fs.symlinkSync(path.join(outside, 'secret.ts'), path.join(root, 'src', 'linked.ts'));
     assert.throws(() => planCodeFix({ root, file: '../secret.ts', code: 2304 }), /escapes workspace/);
-    assert.throws(() => planCodeFix({ root, file: 'src/linked.ts', code: 2304 }), /non-symlink workspace file/);
     assert.throws(() => planCodeFix({ root, file: 'src/main.ts', code: 2304, occurrence: 55 }), /occurrence not found/);
     assert.throws(() => planCodeFix({ root, file: 'src/main.ts', code: 2304, fixIndex: 999 }), /index not found/);
     assert.throws(() => planCodeFix({ root, file: 'src/main.ts', code: -1 }), /positive TypeScript diagnostic/);
+    fs.symlinkSync(path.join(outside, 'secret.ts'), path.join(root, 'src', 'linked.ts'));
+    assert.throws(() => planCodeFix({ root, file: 'src/linked.ts', code: 2304 }), /non-symlink workspace file/);
   } finally { clean(root); clean(outside); }
 });
 
