@@ -36,7 +36,9 @@ function actionsFor(service, file, diagnostic) {
   );
 }
 function diagnosticRecord(source, d) {
-  const location = ts.computeLineAndCharacterOfPosition(ts.computeLineStarts(source), d.start);
+  const prefix = source.slice(0, d.start);
+  const lines = prefix.split('\n');
+  const location = { line: lines.length - 1, character: lines[lines.length - 1].length };
   return {
     code: d.code,
     message: ts.flattenDiagnosticMessageText(d.messageText, '\n'),
