@@ -112,6 +112,27 @@ Returned `resolution.code_actions[].changes` include workspace-relative paths an
 
 All positions are **1-based lines and columns**. `--root` and `--config` select another TypeScript project; `--prefix` filters suggestions. An import code action is a preview, not an applied patch; validate it with the compiler, tests and matching source revision before integration.
 
+## Executable compiler-backed quick fixes
+
+`code:fix` extends the compiler completion and semantic refactoring tools into **real, guarded TypeScript code repairs**. It discovers current compiler diagnostics and compiler-supplied repair actions, previews exact edits and SHA-256 source/output digests, and applies an explicitly selected fix. For example, a missing local import (diagnostic TS2304) can be inserted and verified against the complete configured TypeScript project.
+
+```bash
+# List real diagnostics and available compiler fixes (read-only JSON)
+npm run code:fix -- --file src/main.ts
+
+# Preview one fix. Use the fix_index returned by the preceding inventory.
+npm run code:fix -- --file src/main.ts --code 2304 --fix-index 0
+
+# Perform the selected fix with source-revision guards, workspace locking,
+# compiler diagnostic comparison, rollback on catchable failure, and readback.
+npm run code:fix -- --file src/main.ts --code 2304 --fix-index 0 --apply
+
+# Exercise the compiler, CLI and adversarial failure paths
+npm run test:code-fix
+```
+
+For repeated diagnostic codes, use `--occurrence N` (zero-based). The compiler's selected action must not run arbitrary commands, create files, touch symlinked or out-of-project sources, add compiler diagnostics, or fail to reduce the selected diagnostic count. Existing files must still match the preview when applying. This is a checked local workspace operation, **not** a remote AI generator or a crash-proof multi-file database transaction. Verify application integration and CI against the intended revision.
+
 ## Executable compiler-aware refactoring
 
 `code:refactor` adds actual cross-file TypeScript symbol renames to the existing completion, compiler-inspection, and symbol-knowledge tools. It uses TypeScript's rename locations, not text search; unrelated same-spelling local symbols stay untouched.
