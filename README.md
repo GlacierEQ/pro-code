@@ -130,11 +130,17 @@ npm run code:fix -- --file src/main.ts --code 2304 --fix-index 0
 # compiler diagnostic comparison, rollback on catchable failure, and readback.
 npm run code:fix -- --file src/main.ts --code 2304 --fix-index 0 --apply
 
+# Run an independently verified repair, using the first eligible compiler fix.
+# The verifier must be an existing regular Node test file within the workspace.
+# This executes the test before and after, requires it to pass after the repair,
+# and safely restores exact original bytes when post-repair verification fails.
+npm run code:fix -- --file src/main.ts --code 2304 --repair --verify-test test/repair-acceptance.test.mjs
+
 # Exercise the compiler, CLI and adversarial failure paths
 npm run test:code-fix
 ```
 
-For repeated diagnostic codes, use `--occurrence N` (zero-based). The compiler's selected action must not run arbitrary commands, create files, touch symlinked or out-of-project sources, add compiler diagnostics, or fail to reduce the selected diagnostic count. Existing files must still match the preview when applying. This is a checked local workspace operation, **not** a remote AI generator or a crash-proof multi-file database transaction. Verify application integration and CI against the intended revision.
+For repeated diagnostic codes, use `--occurrence N` (zero-based). The compiler's selected action must not run arbitrary commands, create files, touch symlinked or out-of-project sources, add compiler diagnostics, or fail to reduce the selected diagnostic count. Existing files must still match the preview when applying. The new `--repair --verify-test <workspace-file>` path executes an actual independent Node test (direct process invocation, no shell), performs the compiler-confirmed fix under the existing guarded transaction, checks the target diagnostic and output digests, then either reports `verified_code_repair` or restores the originals if verification fails. If the verifier or another writer modifies a repaired source file after application, the engine refuses to overwrite it and reports a blocked reconciliation state. The external test runs with the same filesystem permissions as the calling user; only use trusted, authorized tests. `--timeout-ms` limits each verification run to 1–120 seconds; it is not a universal limit on all work. This is a checked local workspace operation, **not** a remote AI generator, full benchmark improvement, production deployment, or a crash-proof multi-file database transaction. Verify application integration and CI against the intended revision.
 
 ## Executable compiler-aware refactoring
 
