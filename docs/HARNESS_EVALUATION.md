@@ -18,9 +18,9 @@ The strict command emits JSON and exits nonzero unless all durable cases pass **
 - **Baseline:** the exact same `startNexusServer` with `journalDir = null` (bounded in-memory idempotency).
 - **Candidate:** the exact same `startNexusServer` with `journalDir` pointing at an isolated temporary directory (durable claims and completion receipts).
 - **Hypothesis:** enabling the journal prevents duplicate worker executions on a controlled restart, rejects a conflicting key after restart, and refuses to repeat a seeded uncertain claim, without reducing already-correct safety behavior.
-- **Input control:** identical versioned request envelopes and fixture operations, no network calls other than loopback HTTP to servers created by the runner.
+- **Input control:** identical versioned request envelopes and fixture operations, no network calls other than loopback HTTP to servers created by the runner. The test isolates `PRO_CODE_ALLOWED_ORIGINS` from the launching shell and uses bounded HTTP deadlines.
 - **Operator authority and evidence:** the fixture grants no external actions and the tested worker only returns a deterministic `workspace_inventory` response. Unsupported worker requests remain unsupported. The runner does not write to any connected provider or user repository.
-- **Control:** recorded `dataset_sha256` of seven scenario specifications; `source_revision` is populated from `GITHUB_SHA` in CI or supplied by the caller. `model: null` means no model was called or compared.
+- **Control:** `dataset_sha256` hashes the seven scenario specifications **and executable evaluator/runtime source**, and `executable_source_sha256` identifies their exact bytes; `source_revision` is populated from `GITHUB_SHA` in CI or supplied by the caller (null for an unpinned local checkout). `model: null` means no model was called or compared.
 - **Tasks:** `sequential_replay`, `concurrent_replay`, `restart_replay`, `restart_conflict`, `uncertain_claim`, `unsupported_capability`, and `foreign_origin`.
 - **Oracle:** executable HTTP status and receipt checks, exact response equivalence for replay, and independent fixture invocation counts. A generated narrative cannot change a pass/fail decision.
 - **Reported metrics:** correctly handled cases / total and summed worker invocations, plus per-case response status and replay evidence.
