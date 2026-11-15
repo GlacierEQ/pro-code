@@ -192,7 +192,8 @@ export function assessMeasuredHarnessEvidence(experiment) {
   const before = experiment?.cases?.baseline
   const after = experiment?.cases?.candidate
   const validCase = item => item && typeof item.case_id === 'string'
-    && item.case_id.trim() && typeof item.correct === 'boolean'
+    && item.case_id.trim() && typeof item.expected === 'string' && item.expected.trim()
+    && ['bare', 'durable'].includes(item.mode) && typeof item.correct === 'boolean'
     && Number.isSafeInteger(item.worker_executions) && item.worker_executions >= 0
   const validList = entries => Array.isArray(entries) && entries.length >= 2
     && entries.every(validCase) && new Set(entries.map(item => item.case_id)).size === entries.length
