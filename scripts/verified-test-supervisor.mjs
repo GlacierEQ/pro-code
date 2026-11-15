@@ -23,11 +23,15 @@ if (!testFile || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000 || timeou
   let timedOut = false;
   let outputOverflow = false;
   let spawnError = null;
+  let groupTerminationSignaled = false;
   let reported = false;
   const limit = 1_048_576;
   function killTree() {
     try {
-      if (useGroup && child.pid) process.kill(-child.pid, 'SIGKILL');
+      if (useGroup && child.pid) {
+        process.kill(-child.pid, 'SIGKILL');
+        groupTerminationSignaled = true;
+      }
       else child.kill('SIGKILL');
     } catch (error) {
       if (error.code !== 'ESRCH') spawnError = String(error);
@@ -72,7 +76,7 @@ if (!testFile || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000 || timeou
       tests_executed: matchTests ? Number(matchTests[1]) : 0,
       tests_passed: matchPassed ? Number(matchPassed[1]) : 0,
       registered_subtests: registered.length,
-      process_group_killed: timedOut || outputOverflow ? useGroup : false,
+      group_termination_signaled: groupTerminationSignaled,
       spawn_error: spawnError, stdout_tail: stdout.slice(-2048), stderr_tail: stderr.slice(-2048),
     }) + '\n');
   }
