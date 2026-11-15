@@ -224,7 +224,7 @@ export async function evaluateHarness({ revision = process.env.GITHUB_SHA ?? nul
       delta_correct_cases: after.passed - before.passed,
     },
     cases: { baseline, candidate },
-    result: verified ? 'local_ablation_improvement_verified' : 'not_verified',
+    result: 'not_verified',
     limitations: [
       'Not SWE-bench, Terminal-Bench, an LLM evaluation, or a held-out coding benchmark',
       'Worker operations are deterministic fixtures without external provider side effects',
@@ -233,9 +233,10 @@ export async function evaluateHarness({ revision = process.env.GITHUB_SHA ?? nul
     ],
   };
   record.evidence_gate = assessMeasuredHarnessEvidence(record);
-  if (record.evidence_gate.decision !== 'accept_local_component_evidence') {
-    record.result = 'not_verified';
-  }
+  // The published result is derived from observed measurements and the
+  // separate evidence gate; it is never input to that gate.
+  record.result = verified && record.evidence_gate.decision === 'accept_local_component_evidence'
+    ? 'local_ablation_improvement_verified' : 'not_verified';
   return record;
 }
 
