@@ -106,6 +106,7 @@ test('operator writes source-bound evidence once without stale-run overwrite', (
     const second=run(['evaluate','--out',destination]);
     assert.equal(second.status,2);
     assert.equal(JSON.parse(second.stdout).status,'failed');
+    assert.equal(JSON.parse(second.stdout).error_code,'evidence_exists');
     assert.equal(readFileSync(destination,'utf8'),original);
     assert.equal(existsSync(destination+'.bridge.lock'),false);
   } finally {cleanup(root);}
@@ -129,7 +130,10 @@ test('operator refuses incomplete authority, fake success, unknown operations an
   for (const args of [[],['pretend'],['repair','--file','src/main.ts'],['inspect'],
     ['evaluate','--file','src/main.ts'],['evaluate','--process-timeout','2'],
     ['inspect','--file','src/main.ts','--occurrence','2'],
-    ['inspect','--file','src/main.ts','--timeout-ms','1000']]) {
+    ['inspect','--file','src/main.ts','--timeout-ms','1000'],
+    ['inspect','--file','src/main.ts','--timeout-ms','30000'],
+    ['inspect','--file','src/main.ts','--occurrence','0'],
+    ['evaluate','--timeout-ms','30000']]) {
     const result=run(args);
     assert.notEqual(result.status,0,'must reject '+args.join(' '));
     assert.doesNotMatch(result.stdout,/Runtime observed ok/);
