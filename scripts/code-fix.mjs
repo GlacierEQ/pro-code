@@ -250,16 +250,27 @@ export function executeVerifiedCodeRepair({
   });
 
   const executeTest = () => {
+    // A child spawned under node --test inherits NODE_TEST_CONTEXT=child-v8.
+    // Without clearing it, nested "node --test" SKIPS THE FILE and exits 0.
+    const childEnv = { ...process.env };
+    delete childEnv.NODE_TEST_CONTEXT;
     const result = spawnSync(process.execPath, ['--test', verifier], {
       cwd: workspace, timeout: timeoutMs, encoding: 'utf8', maxBuffer: 1_048_576,
-      shell: false,
+      shell: false, env: childEnv,
     });
+    const stdout = result.stdout ?? '';
+    const declaredTests = /^# tests (\d+)$/m.exec(stdout);
+    const declaredPasses = /^# pass (\d+)$/m.exec(stdout);
+    const testsExecuted = declaredTests !== null && declaredPasses !== null
+      && Number(declaredTests[1]) > 0 && Number(declaredPasses[1]) > 0;
     return {
-      passed: result.status === 0 && !result.signal && !result.error,
+      passed: result.status === 0 && !result.signal && !result.error && testsExecuted,
+      tests_executed: declaredTests ? Number(declaredTests[1]) : 0,
+      tests_passed: declaredPasses ? Number(declaredPasses[1]) : 0,
       exit_code: result.status,
       signal: result.signal ?? null,
       error_code: result.error?.code ?? null,
-      stdout_tail: (result.stdout ?? '').slice(-2048),
+      stdout_tail: stdout.slice(-2048),
       stderr_tail: (result.stderr ?? '').slice(-2048),
     };
   };
