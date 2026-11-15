@@ -241,6 +241,7 @@ export function executeVerifiedCodeRepair({
   const initialProject = createProject(workspace, config);
   let originalDiagnosticCount;
   let originalProjectDiagnostics;
+  let projectFileHashes;
   let candidateActions;
   try {
     if (!initialProject.scriptFiles.includes(target)) throw new Error('target outside configured TypeScript project');
@@ -248,6 +249,9 @@ export function executeVerifiedCodeRepair({
     if (occurrence >= matching.length) throw new Error('selected compiler diagnostic not found in original source');
     originalDiagnosticCount = matching.length;
     originalProjectDiagnostics = diagnose(initialProject.program, workspace);
+    projectFileHashes = new Map(initialProject.scriptFiles.map(name => [
+      name, digest(fs.readFileSync(name)),
+    ]));
     candidateActions = actionsFor(initialProject.languageService, target, matching[occurrence])
       .map((action, index) => ({ fix_index: index,
         requires_commands: Boolean(action.commands?.length), file_count: action.changes?.length ?? 0 }));
@@ -316,6 +320,14 @@ export function executeVerifiedCodeRepair({
       catch (error) { if (error.code !== 'ENOENT') throw error; }
     }
   };
+  // Detect verifier and unrelated concurrent mutations across the entire
+  // indexed TypeScript project, not just the file selected for repair.
+  const unexpectedProjectFiles = () => [...projectFileHashes].filter(([name, originalHash]) => {
+    try {
+      const current = secureFile(workspace, path.relative(workspace, name));
+      return digest(fs.readFileSync(current)) !== originalHash;
+    } catch { return true; }
+  }).map(([name]) => path.relative(workspace, name).split(path.sep).join('/'));
   const baseline = executeTest();
   const receipt = {
     schema_version: 'glaciereq.pro-code.verified-code-repair.v1',
@@ -328,6 +340,7 @@ export function executeVerifiedCodeRepair({
     verifier: path.relative(workspace, verifier).split(path.sep).join('/'),
     baseline,
     verification: null,
+    unplanned_project_files: [],
     outcome: 'blocked',
     source_modified: false,
     rollback: null,
@@ -339,13 +352,15 @@ export function executeVerifiedCodeRepair({
   };
   // An independent test is code execution, not a trusted read-only oracle.
   // If the baseline test changed a source file, stop before applying our edit.
+  const baselineChanges = unexpectedProjectFiles();
   const baselineHashesMatch = originals.every(item => {
-    try { return digest(fs.readFileSync(secureFile(workspace, item.relative), 'utf8')) === item.before; }
+    try { return digest(fs.readFileSync(secureFile(workspace, item.relative))) === item.before; }
     catch { return false; }
   });
-  if (!baselineHashesMatch) {
+  if (!baselineHashesMatch || baselineChanges.length) {
     receipt.outcome = 'baseline_verifier_modified_source';
     receipt.source_modified = true;
+    receipt.unplanned_project_files = baselineChanges;
     return receipt;
   }
   if (baseline.error_code === 'ETIMEDOUT' || baseline.error_code === 'ENOBUFS') {
@@ -405,12 +420,16 @@ export function executeVerifiedCodeRepair({
     } finally { currentProject.languageService.dispose(); }
     const hashesMatch = originals.every(item =>
       digest(fs.readFileSync(secureFile(workspace, item.relative))) === item.after);
+    const expectedTargets = new Set(originals.map(item => path.resolve(workspace, item.relative)));
+    const externalChanges = unexpectedProjectFiles()
+      .filter(name => !expectedTargets.has(path.resolve(workspace, name)));
+    receipt.unplanned_project_files = externalChanges;
     receipt.verification = {
       ...test, compiler_diagnostic_before: originalDiagnosticCount,
       compiler_diagnostic_after: remaining, new_project_diagnostic_count: introduced.length,
       new_project_diagnostics: introduced.slice(0, 10), all_write_hashes_match: hashesMatch,
     };
-    if (test.passed && remaining < originalDiagnosticCount && hashesMatch && !introduced.length) {
+    if (test.passed && remaining < originalDiagnosticCount && hashesMatch && !introduced.length && !externalChanges.length) {
       receipt.outcome = 'verified_code_repair';
       receipt.source_modified = true;
       return receipt;
@@ -436,8 +455,10 @@ export function executeVerifiedCodeRepair({
     const exact = restored.verified && originals.every(item =>
       digest(fs.readFileSync(secureFile(workspace, item.relative), 'utf8')) === item.before);
     receipt.rollback = { attempted: true, verified: exact, error: null };
-    receipt.source_modified = !exact;
-    receipt.outcome = exact ? 'verification_failed_restored' : 'restoration_not_verified';
+    receipt.source_modified = !exact || receipt.unplanned_project_files.length > 0;
+    receipt.outcome = !exact ? 'restoration_not_verified'
+      : receipt.unplanned_project_files.length ? 'verification_failed_restored_with_external_changes'
+        : 'verification_failed_restored';
   } catch (error) {
     receipt.rollback = { attempted: true, verified: false,
       error: error instanceof Error ? error.message : String(error) };
