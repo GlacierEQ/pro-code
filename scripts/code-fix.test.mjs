@@ -229,3 +229,31 @@ test('CLI repair uses real source and test and requires explicit verifier', () =
     assert.match(read(root,'main.ts'),/import/);
   } finally {clean(root);}
 });
+
+
+test('failed guarded apply returns source-backed unchanged state with no false completion', () => {
+  const root=fixture({'util.ts':'export function rocketLaunch() { return 42; }\n',
+    'main.ts':'const n = rocketLaunch();\n'});
+  const before=read(root,'main.ts');
+  const verifyTest=createVerifier(root, "import test from 'node:test'; test('baseline',()=>{});");
+  try {
+    fs.mkdirSync(path.join(root,'.pro-code'));
+    fs.writeFileSync(path.join(root,'.pro-code','semantic-refactor.lock'),'existing concurrent writer');
+    const result=executeVerifiedCodeRepair({root,file:'src/main.ts',code:2304,verifyTest});
+    assert.equal(result.outcome,'application_failed_unchanged');
+    assert.equal(result.source_modified,false);
+    assert.equal(result.rollback.verified,true);
+    assert.match(result.application_error,/EEXIST/);
+    assert.equal(read(root,'main.ts'),before);
+    assert.equal(Object.hasOwn(result,'workspace'),false,'do not leak host absolute workspace path');
+  } finally {clean(root);}
+});
+
+test('API requires an explicit real verifier path before attempting any source mutation', () => {
+  const root=fixture({'util.ts':'export function rocketLaunch() { return 42; }\n',
+    'main.ts':'const n = rocketLaunch();\n'});
+  try {
+    assert.throws(()=>executeVerifiedCodeRepair({root,file:'src/main.ts',code:2304}),/verifyTest path/);
+    assert.equal(read(root,'main.ts'),'const n = rocketLaunch();\n');
+  } finally {clean(root);}
+});
