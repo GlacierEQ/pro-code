@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { lstat, mkdir, open, rename, unlink } from 'node:fs/promises';
+import { link, lstat, mkdir, open, unlink } from 'node:fs/promises';
 import path from 'node:path';
 
 // A durable claim exists before the executor runs. An interrupted claim is
@@ -9,10 +9,29 @@ export function createDispatchJournal(directory) {
   if (typeof directory !== 'string' || !directory.trim()) throw new TypeError('journal directory is required');
   const root = path.resolve(directory);
   const filename = key => path.join(root, createHash('sha256').update(key).digest('hex') + '.json');
+  let prepared;
+  async function syncDirectory(dir) {
+    const handle = await open(dir, 'r');
+    try { await handle.sync(); } finally { await handle.close(); }
+  }
   async function prepare() {
-    await mkdir(root, { recursive: true, mode: 0o700 });
-    const info = await lstat(root);
-    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('dispatch journal must be a real directory');
+    if (!prepared) prepared = (async () => {
+      // Persist every directory creation in its parent, not just the claim
+      // file: otherwise a power loss can forget a newly-created journal root.
+      let current = path.parse(root).root;
+      for (const part of path.relative(current, root).split(path.sep).filter(Boolean)) {
+        const next = path.join(current, part);
+        try { await mkdir(next, { mode: 0o700 }); }
+        catch (error) { if (error.code !== 'EEXIST') throw error; }
+        await syncDirectory(current);
+        const info = await lstat(next);
+        if (next === root && (!info.isDirectory() || info.isSymbolicLink())) {
+          throw new Error('dispatch journal must be a real directory');
+        }
+        current = next;
+      }
+    })().catch(error => { prepared = null; throw error; });
+    await prepared;
   }
   async function readRecord(file) {
     const handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
@@ -37,8 +56,7 @@ export function createDispatchJournal(directory) {
       handle = await open(file, 'wx', 0o600);
       await handle.writeFile(JSON.stringify({ schema_version: 1, status: 'pending', envelope_digest: envelopeDigest }) + '\n');
       await handle.sync();
-      const directoryHandle = await open(root, 'r');
-      try { await directoryHandle.sync(); } finally { await directoryHandle.close(); }
+      await syncDirectory(root);
       return { state: 'reserved' };
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
@@ -48,7 +66,10 @@ export function createDispatchJournal(directory) {
     const record = await readRecord(file).catch(() => null);
     if (!record) return { state: 'in_doubt' };
     if (record.envelope_digest !== envelopeDigest) return { state: 'conflict' };
-    if (record.status === 'completed') return { state: 'replay', payload: record.payload };
+    const completed = await readRecord(file + '.done').catch(() => null);
+    if (completed && completed.status === 'completed' && completed.envelope_digest === envelopeDigest) {
+      return { state: 'replay', payload: completed.payload };
+    }
     return { state: 'in_doubt' };
   }
   async function complete(key, envelopeDigest, payload) {
@@ -68,9 +89,11 @@ export function createDispatchJournal(directory) {
       await handle.sync();
       await handle.close();
       handle = null;
-      await rename(temporary, file);
-      const directoryHandle = await open(root, 'r');
-      try { await directoryHandle.sync(); } finally { await directoryHandle.close(); }
+      // Hard-link creation is exclusive: unlike rename it cannot overwrite
+      // an already-completed receipt if two completion attempts race.
+      await link(temporary, file + '.done');
+      await syncDirectory(root);
+      await unlink(temporary);
     } catch (error) {
       if (handle) await handle.close().catch(() => {});
       await unlink(temporary).catch(() => {});
