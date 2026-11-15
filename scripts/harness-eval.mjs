@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startNexusServer } from '../server/nexus.mjs';
 import { createDispatchJournal } from '../server/durable-dispatch.mjs';
+import { assessMeasuredHarnessEvidence } from '../server/innovation.mjs';
 
 // Real local HTTP execution. "Bare" and "durable" use the SAME Nexus source,
 // operation fixture, request envelope and runtime; only journalDir differs.
@@ -23,7 +24,7 @@ const CASES = Object.freeze([
 // Hash the scenario specification AND the executable oracles. Merely hashing
 // case labels would reuse an ID after changing the pass/fail interpretation.
 const componentHash = createHash('sha256');
-for (const source of ['./harness-eval.mjs', '../server/nexus.mjs', '../server/durable-dispatch.mjs']) {
+for (const source of ['./harness-eval.mjs', '../server/nexus.mjs', '../server/durable-dispatch.mjs', '../server/innovation.mjs']) {
   const file = fileURLToPath(new URL(source, import.meta.url));
   componentHash.update(source).update(readFileSync(file));
 }
@@ -208,7 +209,7 @@ export async function evaluateHarness({ revision = process.env.GITHUB_SHA ?? nul
   const after = summary(candidate);
   const verified = after.passed === CASES.length && after.passed > before.passed
     && candidate.every(x => x.correct === true);
-  return {
+  const record = {
     schema_version: 'glaciereq.pro-code.harness-eval.v1',
     evaluation_kind: 'hermetic_real_http_ablation',
     scope: 'local_fixture_only',
@@ -223,7 +224,7 @@ export async function evaluateHarness({ revision = process.env.GITHUB_SHA ?? nul
       delta_correct_cases: after.passed - before.passed,
     },
     cases: { baseline, candidate },
-    result: verified ? 'local_ablation_improvement_verified' : 'not_verified',
+    result: 'not_verified',
     limitations: [
       'Not SWE-bench, Terminal-Bench, an LLM evaluation, or a held-out coding benchmark',
       'Worker operations are deterministic fixtures without external provider side effects',
@@ -231,6 +232,12 @@ export async function evaluateHarness({ revision = process.env.GITHUB_SHA ?? nul
       'No production deployment, overall agent improvement, or cross-provider exactly-once guarantee implied',
     ],
   };
+  record.evidence_gate = assessMeasuredHarnessEvidence(record);
+  // The published result is derived from observed measurements and the
+  // separate evidence gate; it is never input to that gate.
+  record.result = verified && record.evidence_gate.decision === 'accept_local_component_evidence'
+    ? 'local_ablation_improvement_verified' : 'not_verified';
+  return record;
 }
 
 async function cli(args) {
@@ -253,7 +260,8 @@ async function cli(args) {
       await rm(temporary, { force: true }).catch(() => {});
     }
   }
-  if (strict && result.result !== 'local_ablation_improvement_verified') process.exitCode = 1;
+  if (strict && (result.result !== 'local_ablation_improvement_verified'
+      || result.evidence_gate.decision !== 'accept_local_component_evidence')) process.exitCode = 1;
 }
 
 const invokedPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : null;
