@@ -115,6 +115,26 @@ Returned `resolution.code_actions[].changes` include workspace-relative paths an
 
 All positions are **1-based lines and columns**. `--root` and `--config` select another TypeScript project; `--prefix` filters suggestions. An import code action is a preview, not an applied patch; validate it with the compiler, tests and matching source revision before integration.
 
+## Verified engineering operator entrypoint
+
+The existing `scripts/operate.py` is no longer a misleading one-line success message. It delegates to the actual compiler-backed repair engine and measured recovery evaluator, preserves their native JSON receipts, and exits unsuccessfully when an operation fails or lacks the necessary evidence. It does not create another agent controller or enable unrequested external tool actions.
+
+```bash
+# Run real, isolated inspect/repair/evaluate integration tests
+npm run test:operator
+
+# Inspect an existing configured TypeScript workspace
+npm run operator -- inspect --workspace /path/to/project --file src/main.ts
+
+# Change code only when the designated trusted Node test supports the outcome
+npm run operator -- repair --workspace /path/to/project --file src/main.ts --code 2304 --verify-test tests/repair-acceptance.test.mjs
+
+# Measure actual local Nexus recovery behavior with read-only fixture work
+npm run operator -- evaluate
+```
+
+Choose the workspace and verifier from your actual project; the example paths are illustrative, not files provided by this repository. `inspect` is source-read-only; `repair` runs local trusted Node test code with your account's permissions and may modify source only through the existing guarded transaction. `evaluate` executes loopback HTTP fixtures and emits scoped metrics; it does not evaluate model weights or perform production deployment. A zero exit code means the native operation's expected structural receipt and required outcome were observed, not that arbitrary downstream user goals were met.
+
 ## Executable compiler-backed quick fixes
 
 `code:fix` extends the compiler completion and semantic refactoring tools into **real, guarded TypeScript code repairs**. It discovers current compiler diagnostics and compiler-supplied repair actions, previews exact edits and SHA-256 source/output digests, and applies an explicitly selected fix. For example, a missing local import (diagnostic TS2304) can be inserted and verified against the complete configured TypeScript project.
