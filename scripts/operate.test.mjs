@@ -102,6 +102,10 @@ test('operator refuses incomplete authority, fake success, unknown operations an
     assert.notEqual(result.status,0,'must reject '+args.join(' '));
     assert.doesNotMatch(result.stdout,/Runtime observed ok/);
   }
+  const unsafe=run(['repair','--file','src/main.ts','--code','2304',
+    '--verify-test','verify.test.mjs','--process-timeout','30']);
+  assert.notEqual(unsafe.status,0);
+  assert.match(unsafe.stderr,/unsafe for mutating repair/);
   const invalid=run(['inspect','--workspace','/path-that-does-not-exist',
     '--file','src/main.ts']);
   assert.notEqual(invalid.status,0);
