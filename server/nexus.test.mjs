@@ -515,3 +515,23 @@ test('parallel memory sync writes stay atomic without shared temporary-file race
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('journal health fails closed when its storage becomes insecure', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'pro-code-health-journal-'));
+  const runtime = await startNexusServer({host:'127.0.0.1',port:0,journalDir:directory});
+  try {
+    const healthy = await fetch(runtime.url + '/health');
+    assert.equal(healthy.status, 200);
+    assert.equal((await healthy.json()).journal.ready, true);
+    const { chmod } = await import('node:fs/promises');
+    await chmod(directory, 0o755);
+    const unhealthy = await fetch(runtime.url + '/health');
+    assert.equal(unhealthy.status, 503);
+    const body = await unhealthy.json();
+    assert.equal(body.status, 'degraded');
+    assert.equal(body.journal.ready, false);
+  } finally {
+    await new Promise((resolve,reject)=>runtime.server.close(error=>error?reject(error):resolve()));
+    await rm(directory,{recursive:true,force:true});
+  }
+});
