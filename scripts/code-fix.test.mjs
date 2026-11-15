@@ -319,3 +319,29 @@ test('verifier introducing unrelated compiler error cannot certify repair or hid
     assert.match(read(root,'util.ts'),/incorrect/,'do not clobber a verifier write');
   } finally {clean(root);}
 });
+
+
+test('supervised verifier timeout kills POSIX test process group and leaves source unmodified', () => {
+  const root=fixture({'util.ts':'export function rocketLaunch() { return 42; }\n',
+    'main.ts':'const n = rocketLaunch();\n'});
+  const before=read(root,'main.ts');
+  const verifyTest=createVerifier(root,[
+    "import test from 'node:test';",
+    "import { spawn } from 'node:child_process';",
+    "test('hangs with a descendant',async()=>{",
+    "spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:['ignore','ignore','ignore']});",
+    "await new Promise(()=>{});",
+    "});",
+  ].join('\n'));
+  try {
+    const started=Date.now();
+    const result=executeVerifiedCodeRepair({root,file:'src/main.ts',code:2304,verifyTest,timeoutMs:1_400});
+    assert.equal(result.outcome,'baseline_verifier_unavailable');
+    assert.equal(result.baseline.passed,false);
+    assert.equal(result.baseline.error_code,'ETIMEDOUT');
+    if(process.platform!=='win32') assert.equal(result.baseline.process_group_killed,true);
+    assert.equal(result.source_modified,false);
+    assert.equal(read(root,'main.ts'),before);
+    assert.ok(Date.now()-started < 9_000,'supervised verifier timeout must return promptly');
+  } finally {clean(root);}
+});
