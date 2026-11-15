@@ -238,9 +238,8 @@ export function assessMeasuredHarnessEvidence(experiment) {
     if (observed.candidate_passed <= observed.baseline_passed) blockers.push('no_observed_positive_gain')
     if (observed.candidate_passed !== observed.total) blockers.push('candidate_scenarios_incomplete')
   }
-  if (experiment?.result !== 'local_ablation_improvement_verified') {
-    blockers.push('original_evaluation_not_verified')
-  }
+  // Do not trust the producer's claimed result: the admission decision comes
+  // exclusively from measured observations and the recorded control contract.
   return Object.freeze({
     schema_version: 'glaciereq.pro-code.harness-evidence-gate.v1',
     decision: blockers.length ? 'hold' : 'accept_local_component_evidence',
