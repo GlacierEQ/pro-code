@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, open, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import http from 'node:http';
+import { createDispatchJournal } from './durable-dispatch.mjs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -279,7 +280,8 @@ async function serveStatic(requestPath, response, staticRoot = DIST) {
   return true;
 }
 
-export function createNexusHandler({ env = process.env, now = () => new Date(), automation = null, staticRoot = DIST } = {}) {
+export function createNexusHandler({ env = process.env, now = () => new Date(), automation = null, staticRoot = DIST, journalDir = null } = {}) {
+  const journal = journalDir ? createDispatchJournal(journalDir) : null;
   const idempotency = new Map();
   const receipts = [];
   const contexts = new Map();
@@ -369,7 +371,26 @@ export function createNexusHandler({ env = process.env, now = () => new Date(), 
         }
         // Register the in-flight operation before awaiting it: simultaneous replays
         // share one execution, and conflicting payloads cannot race past admission.
-        const inFlight = buildResult(envelope, now, automation);
+        let persistedReplay = false;
+        const inFlight = (async () => {
+          if (journal) {
+            const admission = await journal.reserve(key, envelopeDigest);
+            if (admission.state === 'conflict' || admission.state === 'in_doubt') {
+              const error = new Error(admission.state === 'conflict'
+                ? 'Idempotency key was already used with a different envelope'
+                : 'Dispatch has an interrupted or uncertain claim; reconcile its native outcome before retrying');
+              error.statusCode = 409;
+              throw error;
+            }
+            if (admission.state === 'replay') {
+              persistedReplay = true;
+              return admission.payload;
+            }
+          }
+          const executed = await buildResult(envelope, now, automation);
+          if (journal) await journal.complete(key, envelopeDigest, executed);
+          return executed;
+        })();
         idempotency.set(key, { envelopeDigest, inFlight });
         let payload;
         try {
@@ -388,9 +409,12 @@ export function createNexusHandler({ env = process.env, now = () => new Date(), 
           // replay twice. The bound applies to completed receipts only.
           if (!record.inFlight) idempotency.delete(oldKey);
         }
-        receipts.unshift(payload.receipt);
-        if (receipts.length > MAX_RECEIPTS) receipts.length = MAX_RECEIPTS;
-        sendJson(response, payload.success ? 200 : 501, payload);
+        if (!persistedReplay) {
+          receipts.unshift(payload.receipt);
+          if (receipts.length > MAX_RECEIPTS) receipts.length = MAX_RECEIPTS;
+        }
+        sendJson(response, payload.success ? 200 : 501, payload,
+          persistedReplay ? { 'X-Idempotent-Replay': 'true' } : {});
         return;
       }
 
@@ -437,8 +461,9 @@ export async function startNexusServer({
   now,
   automation = null,
   staticRoot = DIST,
+  journalDir = null,
 } = {}) {
-  const server = http.createServer(createNexusHandler({ env, now, automation, staticRoot }));
+  const server = http.createServer(createNexusHandler({ env, now, automation, staticRoot, journalDir }));
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, resolve);
