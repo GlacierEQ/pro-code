@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -50,8 +51,9 @@ def arguments(argv: list[str]) -> argparse.Namespace:
         if opts.out:
             parser.error("--out is supported for evaluate only")
         if opts.operation == "inspect":
-            if opts.code is not None or opts.verify_test or opts.fix_index is not None:
-                parser.error("inspect cannot select a repair action or verifier")
+            if (opts.code is not None or opts.verify_test or opts.fix_index is not None
+                    or opts.occurrence != 0 or opts.timeout_ms != 30000):
+                parser.error("inspect cannot select a repair action, occurrence or verifier timeout")
         else:
             if opts.code is None or opts.code <= 0 or not opts.verify_test:
                 parser.error("repair requires --code positive integer and --verify-test")
@@ -110,19 +112,35 @@ def main(argv: list[str] | None = None) -> int:
     if not node:
         print(json.dumps(error_record("node_unavailable", "Node executable was not found on PATH")))
         return 2
+    lock_fd = None
+    output_lock = None
     try:
         cmd = command_for(opts, node)
+        # A user-selected evaluator output is write-once per path. The
+        # exclusive sibling lock rejects concurrent or stale overwrites.
+        if opts.operation == "evaluate" and opts.out:
+            dest = Path(opts.out).expanduser().resolve()
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            output_lock = Path(str(dest) + ".bridge.lock")
+            lock_fd = os.open(output_lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            if dest.exists() or dest.is_symlink():
+                raise FileExistsError("refusing to replace existing evaluation evidence")
         # Never impose a second hard deadline on mutating repair: killing its
         # process could interrupt source restoration between verification and
         # rollback. The owning Node engine bounds each verifier and closes its
         # own transaction; read-only inspect/evaluate retain an outer deadline.
         outer_timeout = None if opts.operation == "repair" else (opts.process_timeout or 300)
-        result = subprocess.run(cmd, cwd=REPO, shell=False, text=True,
-                                capture_output=True, timeout=outer_timeout, check=False)
-    except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+        result = subprocess.run(cmd, cwd=REPO, shell=False, encoding="utf-8",
+                                errors="strict", text=True, capture_output=True,
+                                timeout=outer_timeout, check=False)
+    except (ValueError, OSError, subprocess.TimeoutExpired, UnicodeError) as exc:
         kind = "command_timeout" if isinstance(exc, subprocess.TimeoutExpired) else "command_unavailable"
         print(json.dumps(error_record(kind, str(exc))))
         return 2
+    finally:
+        if lock_fd is not None:
+            os.close(lock_fd)
+            output_lock.unlink()
     try:
         receipt = json.loads(result.stdout)
     except json.JSONDecodeError:
