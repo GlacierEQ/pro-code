@@ -1,1 +1,136 @@
-print("Runtime observed ok")
+#!/usr/bin/env python3
+"""Native operator entrypoint. Delegates to existing verified Node capabilities.
+
+This file is an adapter, not a second agent runtime. It does not claim success
+unless the owning executable produced an appropriately typed native receipt.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+SCHEMA = "glaciereq.pro-code.operator-bridge.v1"
+
+
+def error_record(code: str, message: str) -> dict:
+    return {"schema_version": SCHEMA, "status": "failed", "error_code": code, "error": message}
+
+
+def arguments(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run existing compiler code-fix and evidence-backed evaluation tools")
+    parser.add_argument("operation", choices=("inspect", "repair", "evaluate"))
+    parser.add_argument("--workspace", help="Workspace for inspect/repair; default current directory")
+    parser.add_argument("--config", default="tsconfig.json")
+    parser.add_argument("--file", help="Existing TypeScript/JavaScript source file to inspect or repair")
+    parser.add_argument("--code", type=int, help="Existing TypeScript diagnostic code for repair")
+    parser.add_argument("--occurrence", type=int, default=0, help="Zero-based diagnostic occurrence")
+    parser.add_argument("--fix-index", type=int, help="Explicit compiler-provided fix index; otherwise first eligible")
+    parser.add_argument("--verify-test", help="Trusted existing Node test file inside the target workspace")
+    parser.add_argument("--timeout-ms", type=int, default=30000, help="Verifier timeout in milliseconds (1000..120000)")
+    parser.add_argument("--out", help="Explicit JSON output filename for evaluate only")
+    parser.add_argument("--process-timeout", type=int, default=300, help="Total local command timeout in seconds (30..900)")
+    opts = parser.parse_args(argv)
+    if opts.process_timeout < 30 or opts.process_timeout > 900:
+        parser.error("--process-timeout must be 30..900 seconds")
+    if opts.operation == "evaluate":
+        if any((opts.workspace, opts.file, opts.code is not None, opts.verify_test,
+                opts.fix_index is not None, opts.occurrence != 0, opts.config != "tsconfig.json",
+                opts.timeout_ms != 30000)):
+            parser.error("evaluate does not accept source repair flags")
+    else:
+        if not opts.file:
+            parser.error("inspect and repair require --file")
+        if opts.out:
+            parser.error("--out is supported for evaluate only")
+        if opts.operation == "inspect":
+            if opts.code is not None or opts.verify_test or opts.fix_index is not None:
+                parser.error("inspect cannot select a repair action or verifier")
+        else:
+            if opts.code is None or opts.code <= 0 or not opts.verify_test:
+                parser.error("repair requires --code positive integer and --verify-test")
+            if opts.timeout_ms < 1000 or opts.timeout_ms > 120000:
+                parser.error("repair --timeout-ms must be 1000..120000")
+    return opts
+
+
+def command_for(opts: argparse.Namespace, node: str) -> list[str]:
+    if opts.operation == "evaluate":
+        command = [node, str(REPO / "scripts/harness-eval.mjs"), "--strict"]
+        if opts.out:
+            command += ["--out", str(Path(opts.out).expanduser().resolve())]
+        return command
+
+    workspace = str(Path(opts.workspace or ".").expanduser().resolve(strict=True))
+    if not Path(workspace).is_dir():
+        raise ValueError("workspace must be an existing directory")
+    command = [node, str(REPO / "scripts/code-fix.mjs"),
+               "--root", workspace, "--config", opts.config, "--file", opts.file]
+    if opts.operation == "repair":
+        command += ["--code", str(opts.code), "--occurrence", str(opts.occurrence),
+                    "--repair", "--verify-test", opts.verify_test,
+                    "--timeout-ms", str(opts.timeout_ms)]
+        if opts.fix_index is not None:
+            command += ["--fix-index", str(opts.fix_index)]
+    return command
+
+
+def valid_native_result(operation: str, receipt: object) -> bool:
+    if not isinstance(receipt, dict):
+        return False
+    if operation == "inspect":
+        return (receipt.get("operation") == "typescript_code_fix_inventory"
+                and receipt.get("source_modified") is False
+                and isinstance(receipt.get("diagnostics"), list))
+    if operation == "repair":
+        return (receipt.get("operation") == "verified_typescript_code_repair"
+                and receipt.get("outcome") == "verified_code_repair"
+                and receipt.get("source_modified") is True
+                and isinstance(receipt.get("verification"), dict)
+                and receipt["verification"].get("passed") is True
+                and receipt["verification"].get("new_project_diagnostic_count") == 0
+                and receipt["verification"].get("all_write_hashes_match") is True)
+    gate = receipt.get("evidence_gate")
+    return (receipt.get("evaluation_kind") == "hermetic_real_http_ablation"
+            and receipt.get("result") == "local_ablation_improvement_verified"
+            and isinstance(gate, dict)
+            and gate.get("decision") == "accept_local_component_evidence"
+            and gate.get("approval_to_deploy") is False)
+
+
+def main(argv: list[str] | None = None) -> int:
+    opts = arguments(sys.argv[1:] if argv is None else argv)
+    node = shutil.which("node")
+    if not node:
+        print(json.dumps(error_record("node_unavailable", "Node executable was not found on PATH")))
+        return 2
+    try:
+        cmd = command_for(opts, node)
+        result = subprocess.run(cmd, cwd=REPO, shell=False, text=True,
+                                capture_output=True, timeout=opts.process_timeout, check=False)
+    except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+        kind = "command_timeout" if isinstance(exc, subprocess.TimeoutExpired) else "command_unavailable"
+        print(json.dumps(error_record(kind, str(exc))))
+        return 2
+    try:
+        receipt = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        print(json.dumps(error_record("invalid_native_receipt",
+                                      "Owning native command did not produce valid JSON; no completion established")))
+        if result.stderr:
+            print(result.stderr[-1500:], file=sys.stderr)
+        return 1
+    # Preserve exact native receipt. Even if it failed, callers must see the
+    # source-supported error and not a fabricated operator-level success.
+    print(json.dumps(receipt, indent=2))
+    if result.returncode != 0 or not valid_native_result(opts.operation, receipt):
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
