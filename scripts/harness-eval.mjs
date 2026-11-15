@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { startNexusServer } from '../server/nexus.mjs';
 import { createDispatchJournal } from '../server/durable-dispatch.mjs';
 
