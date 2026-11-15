@@ -48,9 +48,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: harness-evidence-${{ github.sha }}
+          name: harness-evidence-${{ github.sha }}-attempt-${{ github.run_attempt }}
           path: .pro-code/runtime/harness-evaluation.json
-          if-no-files-found: warn
+          include-hidden-files: true
+          if-no-files-found: error
           retention-days: 90
 
   native-contracts:
