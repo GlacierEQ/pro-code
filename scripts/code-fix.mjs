@@ -284,6 +284,17 @@ export function executeVerifiedCodeRepair({
       'A verification script that independently changes a repaired source file prevents automatic restoration to avoid clobbering that writer.',
     ],
   };
+  // An independent test is code execution, not a trusted read-only oracle.
+  // If the baseline test changed a source file, stop before applying our edit.
+  const baselineHashesMatch = originals.every(item => {
+    try { return digest(fs.readFileSync(secureFile(workspace, item.relative), 'utf8')) === item.before; }
+    catch { return false; }
+  });
+  if (!baselineHashesMatch) {
+    receipt.outcome = 'baseline_verifier_modified_source';
+    receipt.source_modified = true;
+    return receipt;
+  }
   if (baseline.error_code === 'ETIMEDOUT' || baseline.error_code === 'ENOBUFS') {
     receipt.outcome = 'baseline_verifier_unavailable';
     return receipt;
