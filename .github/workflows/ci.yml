@@ -38,6 +38,9 @@ jobs:
       - name: Execute Vitest suite
         run: npm test -- --reporter=verbose
 
+      - name: Build production bundle
+        run: npm run build
+
       - name: Evaluate live harness recovery ablation
         run: npm run eval:harness -- --out .pro-code/runtime/harness-evaluation.json
 
@@ -49,9 +52,6 @@ jobs:
           path: .pro-code/runtime/harness-evaluation.json
           if-no-files-found: warn
           retention-days: 90
-
-      - name: Build production bundle
-        run: npm run build
 
   native-contracts:
     name: Python, Rust, and Haskell contracts
