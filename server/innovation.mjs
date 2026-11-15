@@ -168,3 +168,86 @@ export function assertInnovationOutcome(outcome) {
   }
   return true
 }
+
+/**
+ * Evidence gate for a completed, controlled local harness ablation.
+ * This checks the structure and internal consistency of a recorded experiment.
+ * It is not an independent re-execution, cryptographic attestation, or
+ * permission to deploy; source-native tests/CI remain separate requirements.
+ */
+export function assessMeasuredHarnessEvidence(experiment) {
+  const blockers = []
+  const hash = value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)
+  if (!experiment || typeof experiment !== 'object' ||
+      experiment.schema_version !== 'glaciereq.pro-code.harness-eval.v1' ||
+      experiment.evaluation_kind !== 'hermetic_real_http_ablation' ||
+      experiment.scope !== 'local_fixture_only') blockers.push('unsupported_evaluation_contract')
+  if (!hash(experiment?.dataset_sha256) || !hash(experiment?.executable_source_sha256)) {
+    blockers.push('unversioned_executable_or_dataset')
+  }
+  if (experiment?.model !== null || experiment?.model_weights_changed !== false) {
+    blockers.push('model_or_training_claim_out_of_scope')
+  }
+
+  const before = experiment?.cases?.baseline
+  const after = experiment?.cases?.candidate
+  const validCase = item => item && typeof item.case_id === 'string'
+    && item.case_id.trim() && typeof item.correct === 'boolean'
+    && Number.isSafeInteger(item.worker_executions) && item.worker_executions >= 0
+  const validList = entries => Array.isArray(entries) && entries.length >= 2
+    && entries.every(validCase) && new Set(entries.map(item => item.case_id)).size === entries.length
+  if (!validList(before) || !validList(after)) blockers.push('incomplete_or_duplicate_observations')
+  const usable = validList(before) && validList(after)
+  const observed = { baseline_passed: null, candidate_passed: null, total: null,
+    baseline_invocations: null, candidate_invocations: null, improved_cases: [],
+    regressed_cases: [] }
+
+  if (usable) {
+    const baseline = new Map(before.map(item => [item.case_id, item]))
+    const candidate = new Map(after.map(item => [item.case_id, item]))
+    const sameCases = baseline.size === candidate.size
+      && [...baseline.keys()].every(key => candidate.has(key)
+        && baseline.get(key).expected === candidate.get(key).expected
+        && baseline.get(key).mode === 'bare' && candidate.get(key).mode === 'durable')
+    if (!sameCases) blockers.push('unpaired_or_mismatched_tasks')
+    observed.baseline_passed = before.filter(item => item.correct).length
+    observed.candidate_passed = after.filter(item => item.correct).length
+    observed.total = before.length
+    observed.baseline_invocations = before.reduce((sum, item) => sum + item.worker_executions, 0)
+    observed.candidate_invocations = after.reduce((sum, item) => sum + item.worker_executions, 0)
+    if (sameCases) for (const [key, prior] of baseline) {
+      const current = candidate.get(key)
+      if (prior.correct && !current.correct) observed.regressed_cases.push(key)
+      if (!prior.correct && current.correct) observed.improved_cases.push(key)
+    }
+    const recorded = experiment?.compared
+    if (!recorded || recorded.baseline?.total !== observed.total
+      || recorded.candidate?.total !== observed.total
+      || recorded.baseline?.passed !== observed.baseline_passed
+      || recorded.candidate?.passed !== observed.candidate_passed
+      || recorded.baseline?.worker_executions !== observed.baseline_invocations
+      || recorded.candidate?.worker_executions !== observed.candidate_invocations
+      || recorded.delta_correct_cases !== observed.candidate_passed - observed.baseline_passed) {
+      blockers.push('reported_metrics_conflict_with_observations')
+    }
+    if (before.some(item => item.failure) || after.some(item => item.failure)) {
+      blockers.push('infrastructure_failure_present')
+    }
+    if (observed.regressed_cases.length) blockers.push('verified_baseline_regression')
+    if (observed.candidate_passed <= observed.baseline_passed) blockers.push('no_observed_positive_gain')
+    if (observed.candidate_passed !== observed.total) blockers.push('candidate_scenarios_incomplete')
+  }
+  if (experiment?.result !== 'local_ablation_improvement_verified') {
+    blockers.push('original_evaluation_not_verified')
+  }
+  return Object.freeze({
+    schema_version: 'glaciereq.pro-code.harness-evidence-gate.v1',
+    decision: blockers.length ? 'hold' : 'accept_local_component_evidence',
+    claim_scope: 'local_fixture_http_recovery_only',
+    approval_to_deploy: false,
+    model_capability_gain_verified: false,
+    independent_native_ci_required: true,
+    observed,
+    blockers: Object.freeze([...new Set(blockers)]),
+  })
+}
