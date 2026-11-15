@@ -133,7 +133,7 @@ npm run operator -- repair --workspace /path/to/project --file src/main.ts --cod
 npm run operator -- evaluate
 ```
 
-Choose the workspace and verifier from your actual project; the example paths are illustrative, not files provided by this repository. `inspect` is source-read-only; `repair` runs local trusted Node test code with your account's permissions and may modify source only through the existing guarded transaction. `evaluate` executes loopback HTTP fixtures and emits scoped metrics; it does not evaluate model weights or perform production deployment. A zero exit code means the native operation's expected structural receipt and required outcome were observed, not that arbitrary downstream user goals were met.
+Choose the workspace and verifier from your actual project; the example paths are illustrative, not files provided by this repository. `inspect` is source-read-only; `repair` runs local trusted Node test code with your account's permissions and may modify source only through the existing guarded transaction. `evaluate` executes loopback HTTP fixtures and emits scoped metrics; it does not evaluate model weights or perform production deployment. A zero exit code means the native operation's expected structural receipt and required outcome were observed, not that arbitrary downstream user goals were met. The outer `--process-timeout` applies only to read-only `inspect` and `evaluate`. It is explicitly rejected for `repair`, because killing the repair process can interrupt rollback after a source mutation; use the native bounded `--timeout-ms` verifier instead. The operator does not claim crash-safe multi-file atomicity.
 
 ## Executable compiler-backed quick fixes
 
