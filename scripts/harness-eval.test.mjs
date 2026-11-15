@@ -28,6 +28,8 @@ test('actual local HTTP ablation measures a reproducible durability gain with no
   const bare = byId(result.cases.baseline);
   const durable = byId(result.cases.candidate);
   for (const id of ['restart_replay', 'restart_conflict', 'uncertain_claim']) {
+    assert.ok(bare.has(id), 'missing baseline case ' + id);
+    assert.ok(durable.has(id), 'missing candidate case ' + id);
     assert.equal(bare.get(id).correct, false);
     assert.equal(durable.get(id).correct, true);
   }
