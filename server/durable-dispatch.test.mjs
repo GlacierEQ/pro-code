@@ -77,3 +77,26 @@ test('world-accessible journal directory is rejected before a claim is admitted'
     await assert.rejects(journal.reserve('private', digest), /private real directory/);
   });
 });
+
+test('missing receipt in persisted completion never becomes a successful replay', async () => {
+  await withJournal(async (journal, root) => {
+    await journal.reserve('malformed', digest);
+    const records = await readdir(root);
+    const claim = records.find(name => name.endsWith('.json'));
+    const { writeFile } = await import('node:fs/promises');
+    await writeFile(path.join(root, claim + '.done'), JSON.stringify({
+      schema_version: 1, status: 'completed', envelope_digest: digest,
+      payload: { status: 'succeeded', success: true },
+    }));
+    assert.deepEqual(await journal.reserve('malformed', digest), { state: 'in_doubt' });
+  });
+});
+
+test('readiness probes writable private journal and rejects an inaccessible root', async () => {
+  await withJournal(async (journal, root) => {
+    assert.equal(await journal.checkReady(), true);
+    const { chmod } = await import('node:fs/promises');
+    await chmod(root, 0o755);
+    await assert.rejects(journal.checkReady(), /private real directory/);
+  });
+});
