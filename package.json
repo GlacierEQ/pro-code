@@ -28,7 +28,7 @@
     "test:code-fix": "node --test scripts/code-fix.test.mjs",
     "eval:harness": "node scripts/harness-eval.mjs --strict",
     "test:harness-evaluation": "node --test scripts/harness-eval.test.mjs",
-    "operator": "python3 scripts/operate.py",
+    "operator": "node scripts/operator-launch.mjs",
     "test:operator": "node --test scripts/operate.test.mjs"
   },
   "dependencies": {
