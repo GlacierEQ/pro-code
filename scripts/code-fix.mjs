@@ -223,10 +223,23 @@ export function executeVerifiedCodeRepair({
   const workspace = fs.realpathSync(path.resolve(root));
   const verifier = secureFile(workspace, verifyTest);
   if (!/\.(?:mjs|cjs|js)$/.test(verifier)) throw new Error('verification must be a workspace Node test file');
-  const inventory = inspectCodeFixes({ root: workspace, config, file, limit: 100 });
-  const diagnostic = inventory.diagnostics.find(d => d.code === code && d.occurrence === occurrence);
-  if (!diagnostic) throw new Error('selected compiler diagnostic not found in original source');
-  const eligible = diagnostic.actions.filter(action => !action.requires_commands && action.file_count > 0);
+  // Use complete compiler diagnostics rather than a truncated inventory UI.
+  const target = secureFile(workspace, file);
+  const initialProject = createProject(workspace, config);
+  let originalDiagnosticCount;
+  let originalProjectDiagnostics;
+  let candidateActions;
+  try {
+    if (!initialProject.scriptFiles.includes(target)) throw new Error('target outside configured TypeScript project');
+    const matching = diagnosticDetails(initialProject.languageService, target).filter(d => d.code === code);
+    if (occurrence >= matching.length) throw new Error('selected compiler diagnostic not found in original source');
+    originalDiagnosticCount = matching.length;
+    originalProjectDiagnostics = diagnose(initialProject.program, workspace);
+    candidateActions = actionsFor(initialProject.languageService, target, matching[occurrence])
+      .map((action, index) => ({ fix_index: index,
+        requires_commands: Boolean(action.commands?.length), file_count: action.changes?.length ?? 0 }));
+  } finally { initialProject.languageService.dispose(); }
+  const eligible = candidateActions.filter(action => !action.requires_commands && action.file_count > 0);
   const indices = fixIndex === null ? eligible.map(action => action.fix_index) : [fixIndex];
   let plan;
   const rejected = [];
@@ -244,8 +257,12 @@ export function executeVerifiedCodeRepair({
   }
   const originals = plan.changed_files.map(change => {
     const absolute = secureFile(workspace, change.path);
-    const original = fs.readFileSync(absolute, 'utf8');
-    if (digest(original) !== change.before_sha256) throw new Error('source changed after preview: ' + change.path);
+    const raw = fs.readFileSync(absolute);
+    const original = raw.toString('utf8');
+    if (!Buffer.from(original, 'utf8').equals(raw)) {
+      throw new Error('refusing non-lossless UTF-8 source: ' + change.path);
+    }
+    if (digest(raw) !== change.before_sha256) throw new Error('source changed after preview: ' + change.path);
     return { relative: change.path, original, before: change.before_sha256, after: change.after_sha256 };
   });
 
@@ -354,15 +371,21 @@ export function executeVerifiedCodeRepair({
   let postError = null;
   try {
     const test = executeTest();
-    const current = inspectCodeFixes({ root: workspace, config, file, limit: 100 });
-    const remaining = current.diagnostics.filter(d => d.code === code).length;
-    const previous = inventory.diagnostics.filter(d => d.code === code).length;
-    const hashesMatch = originals.every(item => digest(fs.readFileSync(secureFile(workspace, item.relative), 'utf8')) === item.after);
+    const currentProject = createProject(workspace, config);
+    let remaining;
+    let introduced;
+    try {
+      remaining = diagnosticDetails(currentProject.languageService, target).filter(d => d.code === code).length;
+      introduced = additionalDiagnostics(originalProjectDiagnostics, diagnose(currentProject.program, workspace));
+    } finally { currentProject.languageService.dispose(); }
+    const hashesMatch = originals.every(item =>
+      digest(fs.readFileSync(secureFile(workspace, item.relative))) === item.after);
     receipt.verification = {
-      ...test, compiler_diagnostic_before: previous,
-      compiler_diagnostic_after: remaining, all_write_hashes_match: hashesMatch,
+      ...test, compiler_diagnostic_before: originalDiagnosticCount,
+      compiler_diagnostic_after: remaining, new_project_diagnostic_count: introduced.length,
+      new_project_diagnostics: introduced.slice(0, 10), all_write_hashes_match: hashesMatch,
     };
-    if (test.passed && remaining < previous && hashesMatch) {
+    if (test.passed && remaining < originalDiagnosticCount && hashesMatch && !introduced.length) {
       receipt.outcome = 'verified_code_repair';
       receipt.source_modified = true;
       return receipt;
