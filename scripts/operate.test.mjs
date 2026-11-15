@@ -48,6 +48,22 @@ test('operator inspect discovers an actual compiler diagnostic without writing s
   } finally {cleanup(root);}
 });
 
+test('operator reports a truncated compiler inventory as incomplete, not verified success', () => {
+  const root=fixture();
+  try {
+    const source=Array.from({length:55},(_,index)=>'missingSymbol_'+index+';').join('\n')+'\n';
+    writeFileSync(path.join(root,'src/main.ts'),source);
+    const result=run(['inspect','--workspace',root,'--file','src/main.ts']);
+    assert.equal(result.status,1,result.stderr);
+    const report=JSON.parse(result.stdout);
+    assert.equal(report.operation,'typescript_code_fix_inventory');
+    assert.ok(report.diagnostic_count>report.returned);
+    assert.equal(report.returned,50);
+    assert.equal(report.source_modified,false);
+    assert.equal(readFileSync(path.join(root,'src/main.ts'),'utf8'),source);
+  } finally {cleanup(root);}
+});
+
 test('operator repairs real code only when an independent test passes after application', () => {
   const root=fixture();
   try {
@@ -147,7 +163,9 @@ test('operator refuses incomplete authority, fake success, unknown operations an
     ['inspect','--file','src/main.ts','--timeout-ms','1000'],
     ['inspect','--file','src/main.ts','--timeout-ms','30000'],
     ['inspect','--file','src/main.ts','--occurrence','0'],
-    ['evaluate','--timeout-ms','30000']]) {
+    ['evaluate','--timeout-ms','30000'],
+    ['repair','--file','src/main.ts','--code','2304','--verify-test','verify.test.mjs','--occurrence','-1'],
+    ['repair','--file','src/main.ts','--code','2304','--verify-test','verify.test.mjs','--fix-index','-1']]) {
     const result=run(args);
     assert.notEqual(result.status,0,'must reject '+args.join(' '));
     assert.doesNotMatch(result.stdout,/Runtime observed ok/);
