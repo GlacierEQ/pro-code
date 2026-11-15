@@ -103,3 +103,41 @@ test('default runtime starts Nexus and completes automatic workspace intelligenc
     await rm(workspaceRoot, { recursive: true, force: true });
   }
 });
+
+test('default automatic runtime preserves dispatch receipts and prevents a second inventory after restart', async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'pro-code-restart-'));
+  await writeFile(path.join(workspaceRoot, 'source.txt'), 'stable input');
+  const env = {
+    PRO_CODE_HOST: '127.0.0.1',
+    PRO_CODE_PORT: '0',
+    PRO_CODE_WORKSPACE_DIR: workspaceRoot,
+    PRO_CODE_AUTOMATION_ENABLED: 'true',
+    PRO_CODE_AUTOMATION_INTERVAL_MS: '3600000',
+  };
+  let firstRuntime;
+  let secondRuntime;
+  try {
+    firstRuntime = await startAutomaticRuntime({ env });
+    await firstRuntime.startup;
+    const first = await dispatch(firstRuntime, 'inventoryWorkspace', 'durable-restart');
+    assert.equal(first.status, 200);
+    const firstReceipt = await first.json();
+    assert.equal(firstReceipt.objective_completed, true);
+    await firstRuntime.close();
+    firstRuntime = null;
+
+    secondRuntime = await startAutomaticRuntime({ env });
+    await secondRuntime.startup;
+    const before = secondRuntime.automation.getStatus().run_count;
+    const replay = await dispatch(secondRuntime, 'inventoryWorkspace', 'durable-restart');
+    assert.equal(replay.status, 200);
+    assert.equal(replay.headers.get('x-idempotent-replay'), 'true');
+    assert.deepEqual(await replay.json(), firstReceipt);
+    assert.equal(secondRuntime.automation.getStatus().run_count, before,
+      'durable replay must not run a second inventory');
+  } finally {
+    if (firstRuntime) await firstRuntime.close();
+    if (secondRuntime) await secondRuntime.close();
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
