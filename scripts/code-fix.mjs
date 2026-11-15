@@ -313,7 +313,7 @@ export function executeVerifiedCodeRepair({
         verifier_sha256: digest(verifierBytes), verifier_unchanged: verifierUnchanged,
         exit_code: report?.exit_code ?? null, signal: report?.signal ?? null,
         error_code: errorCode,
-        process_group_killed: report?.process_group_killed ?? false,
+        group_termination_signaled: report?.group_termination_signaled ?? false,
         stdout_tail: report?.stdout_tail ?? '',
         stderr_tail: report?.stderr_tail ?? String(result.stderr ?? '').slice(-2048),
       };
