@@ -111,6 +111,20 @@ test('operator writes source-bound evidence once without stale-run overwrite', (
   } finally {cleanup(root);}
 });
 
+test('npm operator launcher delegates to the actual Python tool and preserves the native output', () => {
+  const root=fixture();
+  const launcher=fileURLToPath(new URL('./operator-launch.mjs',import.meta.url));
+  try {
+    const result=spawnSync(process.execPath,[launcher,'inspect','--workspace',root,
+      '--file','src/main.ts'],{encoding:'utf8',timeout:40_000});
+    assert.equal(result.status,0,result.stderr);
+    const report=JSON.parse(result.stdout);
+    assert.equal(report.operation,'typescript_code_fix_inventory');
+    assert.equal(report.source_modified,false);
+    assert.ok(report.diagnostics.some(item=>item.code===2304));
+  } finally {cleanup(root);}
+});
+
 test('operator refuses incomplete authority, fake success, unknown operations and invalid timeouts', () => {
   for (const args of [[],['pretend'],['repair','--file','src/main.ts'],['inspect'],
     ['evaluate','--file','src/main.ts'],['evaluate','--process-timeout','2'],
