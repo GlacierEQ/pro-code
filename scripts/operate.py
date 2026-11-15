@@ -36,14 +36,14 @@ def arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--out", help="Explicit JSON output filename for evaluate only")
     parser.add_argument("--process-timeout", type=int, default=None, help="Read-only inspect/evaluate process timeout in seconds (30..900); not available for mutating repairs")
     opts = parser.parse_args(argv)
+    supplied = {item for item in argv if item.startswith('--')}
     if opts.process_timeout is not None and (opts.process_timeout < 30 or opts.process_timeout > 900):
         parser.error("--process-timeout must be 30..900 seconds")
     if opts.operation == "repair" and opts.process_timeout is not None:
         parser.error("--process-timeout is unsafe for mutating repair; use native --timeout-ms for the verifier")
     if opts.operation == "evaluate":
-        if any((opts.workspace, opts.file, opts.code is not None, opts.verify_test,
-                opts.fix_index is not None, opts.occurrence != 0, opts.config != "tsconfig.json",
-                opts.timeout_ms != 30000)):
+        if supplied.intersection({"--workspace", "--config", "--file", "--code",
+                                  "--occurrence", "--fix-index", "--verify-test", "--timeout-ms"}):
             parser.error("evaluate does not accept source repair flags")
     else:
         if not opts.file:
@@ -51,8 +51,8 @@ def arguments(argv: list[str]) -> argparse.Namespace:
         if opts.out:
             parser.error("--out is supported for evaluate only")
         if opts.operation == "inspect":
-            if (opts.code is not None or opts.verify_test or opts.fix_index is not None
-                    or opts.occurrence != 0 or opts.timeout_ms != 30000):
+            if supplied.intersection({"--code", "--verify-test", "--fix-index",
+                                      "--occurrence", "--timeout-ms"}):
                 parser.error("inspect cannot select a repair action, occurrence or verifier timeout")
         else:
             if opts.code is None or opts.code <= 0 or not opts.verify_test:
@@ -134,7 +134,10 @@ def main(argv: list[str] | None = None) -> int:
                                 errors="strict", text=True, capture_output=True,
                                 timeout=outer_timeout, check=False)
     except (ValueError, OSError, subprocess.TimeoutExpired, UnicodeError) as exc:
-        kind = "command_timeout" if isinstance(exc, subprocess.TimeoutExpired) else "command_unavailable"
+        kind = ("command_timeout" if isinstance(exc, subprocess.TimeoutExpired)
+                else "invalid_native_encoding" if isinstance(exc, UnicodeError)
+                else "evidence_exists" if isinstance(exc, FileExistsError)
+                else "command_unavailable")
         print(json.dumps(error_record(kind, str(exc))))
         return 2
     finally:
