@@ -19,6 +19,7 @@ export async function startAutomaticRuntime({ env = process.env, now } = {}) {
     env,
     now,
     automation,
+    journalDir: path.join(automation.outputDir, 'dispatch-journal'),
   });
 
   started.server.once('close', () => automation.stop());
