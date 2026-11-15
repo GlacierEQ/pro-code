@@ -11,7 +11,7 @@ npm run eval:harness -- --out .pro-code/runtime/harness-evaluation.json
 npm run test:harness-evaluation
 ```
 
-The strict command emits JSON and exits nonzero unless all durable cases pass **and** durable cases pass more correctness checks than bare Nexus. CI runs this on an exact GitHub checkout; the output is in its native Actions log. When a local `--out` path is selected explicitly, the runner writes a private (0600) JSON snapshot via a temporary file and atomic rename.
+The strict command emits JSON and exits nonzero unless all durable cases pass **and** durable cases pass more correctness checks than bare Nexus. CI also saves the exact machine-readable evidence as an Actions artifact named `harness-evidence-<github.sha>-attempt-<github.run_attempt>` using a commit-pinned uploader, with requested retention up to 90 days (subject to repository retention policy). The uploader runs even after a failed evaluation step, explicitly includes the narrowly scoped hidden JSON path, and fails if the expected file is missing rather than reporting success without evidence. CI runs this on an exact GitHub checkout; the output is in its native Actions log. When a local `--out` path is selected explicitly, the runner writes a private (0600) JSON snapshot via a temporary file and atomic rename.
 
 ## Actual evaluated component and causal hypothesis
 
