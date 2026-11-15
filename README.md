@@ -130,11 +130,17 @@ npm run code:fix -- --file src/main.ts --code 2304 --fix-index 0
 # compiler diagnostic comparison, rollback on catchable failure, and readback.
 npm run code:fix -- --file src/main.ts --code 2304 --fix-index 0 --apply
 
-# Exercise the compiler, CLI and adversarial failure paths
+# Run the executable end-to-end demo. The tests create real temporary
+# TypeScript projects, introduce TS2304, repair and independently verify them.
 npm run test:code-fix
+
+# For an actual project with a verified compiler diagnostic and existing Node
+# test file, supply that project's own file, code and verifier paths:
+# npm run code:fix -- --file "$TARGET" --code "$DIAGNOSTIC" --repair --verify-test "$VERIFIER"
+
 ```
 
-For repeated diagnostic codes, use `--occurrence N` (zero-based). The compiler's selected action must not run arbitrary commands, create files, touch symlinked or out-of-project sources, add compiler diagnostics, or fail to reduce the selected diagnostic count. Existing files must still match the preview when applying. This is a checked local workspace operation, **not** a remote AI generator or a crash-proof multi-file database transaction. Verify application integration and CI against the intended revision.
+For repeated diagnostic codes, use `--occurrence N` (zero-based). The compiler's selected action must not run arbitrary commands, create files, touch symlinked or out-of-project sources, add compiler diagnostics, or fail to reduce the selected diagnostic count. Existing files must still match the preview when applying. The new `--repair --verify-test <workspace-file>` path executes an actual independent Node test (direct process invocation, no shell), performs the compiler-confirmed fix under the existing guarded transaction, checks the target diagnostic and output digests, then either reports `verified_code_repair` or attempts source-preserving restoration on failure, independently checking the resulting bytes. Restoration is not guaranteed: `restoration_not_verified`, `blocked_external_write_or_rollback_failure`, and `blocked_partial_or_external_write` preserve the uncertainty instead of claiming completion. If the verifier or another writer modifies a repaired source file after application, the engine refuses to overwrite it and reports a blocked reconciliation state. The external test runs with the same filesystem permissions as the calling user; only use trusted, authorized tests. `--timeout-ms` sets the verifier timeout within 1–120 seconds. Its supervisor sends a POSIX process-group termination signal to ordinary verifier descendants on timeout; platform-specific escaped or detached descendants cannot be universally guaranteed terminated. Test bytes are pinned before execution and run through private, same-directory copies, so verifiers must not depend on their exact source basename. This is a checked local workspace operation, **not** a remote AI generator, full benchmark improvement, production deployment, or a crash-proof multi-file database transaction. Verify application integration and CI against the intended revision.
 
 ## Executable compiler-aware refactoring
 
