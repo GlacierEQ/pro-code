@@ -284,38 +284,38 @@ export function executeVerifiedCodeRepair({
   });
 
   const executeTest = () => {
-    // Node test runners set NODE_TEST_CONTEXT=child-v8 on their children;
-    // retaining it makes nested "node --test" skip all tests and exit zero.
-    const childEnv = { ...process.env };
-    delete childEnv.NODE_TEST_CONTEXT;
     const stagedPath = path.join(path.dirname(verifier),
       '.pro-code-verifier-' + crypto.randomUUID() + path.extname(verifier));
     fs.writeFileSync(stagedPath, verifierBytes, { flag: 'wx', mode: 0o600 });
     try {
-      const result = spawnSync(process.execPath, ['--test', stagedPath], {
-        cwd: workspace, timeout: timeoutMs, encoding: 'utf8', maxBuffer: 1_048_576,
-        shell: false, env: childEnv,
+      const supervisor = fileURLToPath(new URL('./verified-test-supervisor.mjs', import.meta.url));
+      const result = spawnSync(process.execPath, [supervisor, stagedPath, String(timeoutMs)], {
+        cwd: workspace, timeout: timeoutMs + 5_000, encoding: 'utf8',
+        maxBuffer: 1_048_576, shell: false,
       });
-      const stdout = result.stdout ?? '';
-      const declaredTests = /^# tests (\d+)$/m.exec(stdout);
-      const declaredPasses = /^# pass (\d+)$/m.exec(stdout);
-      const subtests = [...stdout.matchAll(/^# Subtest: (.+)$/gm)].map(match => match[1].trim());
-      const hasSubtest = subtests.some(name => name !== stagedPath
-        && name !== path.basename(stagedPath));
-      // An empty .test.mjs file can return success as a single wrapper test;
-      // require a registered, non-skipped assertion-bearing Node subtest.
-      const testsExecuted = hasSubtest && declaredTests !== null && declaredPasses !== null
-        && Number(declaredTests[1]) > 0 && Number(declaredPasses[1]) > 0;
+      let report;
+      try { report = JSON.parse(result.stdout ?? ''); }
+      catch { report = null; }
       const verifierUnchanged = fs.existsSync(stagedPath)
         && digest(fs.readFileSync(stagedPath)) === digest(verifierBytes);
+      const testsExecuted = report && report.tests_executed > 0
+        && report.tests_passed > 0 && report.registered_subtests > 0;
+      const errorCode = report?.timed_out ? 'ETIMEDOUT'
+        : report?.output_overflow ? 'ENOBUFS'
+          : result.error?.code ?? (report?.spawn_error ? 'SPAWN_FAILED'
+            : result.status !== 0 || !report ? 'SUPERVISOR_FAILED' : null);
       return {
-        passed: result.status === 0 && !result.signal && !result.error && testsExecuted && verifierUnchanged,
-        tests_executed: declaredTests ? Number(declaredTests[1]) : 0,
-        tests_passed: declaredPasses ? Number(declaredPasses[1]) : 0,
+        passed: Boolean(report && report.exit_code === 0 && !report.signal
+          && !report.timed_out && !report.output_overflow && !errorCode
+          && testsExecuted && verifierUnchanged),
+        tests_executed: report?.tests_executed ?? 0,
+        tests_passed: report?.tests_passed ?? 0,
         verifier_sha256: digest(verifierBytes), verifier_unchanged: verifierUnchanged,
-        exit_code: result.status, signal: result.signal ?? null,
-        error_code: result.error?.code ?? null,
-        stdout_tail: stdout.slice(-2048), stderr_tail: (result.stderr ?? '').slice(-2048),
+        exit_code: report?.exit_code ?? null, signal: report?.signal ?? null,
+        error_code: errorCode,
+        process_group_killed: report?.process_group_killed ?? false,
+        stdout_tail: report?.stdout_tail ?? '',
+        stderr_tail: report?.stderr_tail ?? String(result.stderr ?? '').slice(-2048),
       };
     } finally {
       try { fs.unlinkSync(stagedPath); }
