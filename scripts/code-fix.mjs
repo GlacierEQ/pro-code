@@ -223,6 +223,19 @@ export function executeVerifiedCodeRepair({
   const workspace = fs.realpathSync(path.resolve(root));
   const verifier = secureFile(workspace, verifyTest);
   if (!/\.(?:mjs|cjs|js)$/.test(verifier)) throw new Error('verification must be a workspace Node test file');
+  // Pin verifier bytes from the validated inode. The original pathname is
+  // untrusted after this point; each run uses the same private copy placed
+  // beside it so relative imports retain their workspace directory.
+  const beforeVerifier = fs.statSync(verifier);
+  const verifierFd = fs.openSync(verifier, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+  let verifierBytes;
+  try {
+    const opened = fs.fstatSync(verifierFd);
+    if (!opened.isFile() || beforeVerifier.dev !== opened.dev || beforeVerifier.ino !== opened.ino) {
+      throw new Error('verification file changed between validation and read');
+    }
+    verifierBytes = fs.readFileSync(verifierFd);
+  } finally { fs.closeSync(verifierFd); }
   // Use complete compiler diagnostics rather than a truncated inventory UI.
   const target = secureFile(workspace, file);
   const initialProject = createProject(workspace, config);
@@ -267,29 +280,41 @@ export function executeVerifiedCodeRepair({
   });
 
   const executeTest = () => {
-    // A child spawned under node --test inherits NODE_TEST_CONTEXT=child-v8.
-    // Without clearing it, nested "node --test" SKIPS THE FILE and exits 0.
+    // Node test runners set NODE_TEST_CONTEXT=child-v8 on their children;
+    // retaining it makes nested "node --test" skip all tests and exit zero.
     const childEnv = { ...process.env };
     delete childEnv.NODE_TEST_CONTEXT;
-    const result = spawnSync(process.execPath, ['--test', verifier], {
-      cwd: workspace, timeout: timeoutMs, encoding: 'utf8', maxBuffer: 1_048_576,
-      shell: false, env: childEnv,
-    });
-    const stdout = result.stdout ?? '';
-    const declaredTests = /^# tests (\d+)$/m.exec(stdout);
-    const declaredPasses = /^# pass (\d+)$/m.exec(stdout);
-    const testsExecuted = declaredTests !== null && declaredPasses !== null
-      && Number(declaredTests[1]) > 0 && Number(declaredPasses[1]) > 0;
-    return {
-      passed: result.status === 0 && !result.signal && !result.error && testsExecuted,
-      tests_executed: declaredTests ? Number(declaredTests[1]) : 0,
-      tests_passed: declaredPasses ? Number(declaredPasses[1]) : 0,
-      exit_code: result.status,
-      signal: result.signal ?? null,
-      error_code: result.error?.code ?? null,
-      stdout_tail: stdout.slice(-2048),
-      stderr_tail: (result.stderr ?? '').slice(-2048),
-    };
+    const stagedPath = path.join(path.dirname(verifier),
+      '.pro-code-verifier-' + crypto.randomUUID() + path.extname(verifier));
+    fs.writeFileSync(stagedPath, verifierBytes, { flag: 'wx', mode: 0o600 });
+    try {
+      const result = spawnSync(process.execPath, ['--test', stagedPath], {
+        cwd: workspace, timeout: timeoutMs, encoding: 'utf8', maxBuffer: 1_048_576,
+        shell: false, env: childEnv,
+      });
+      const stdout = result.stdout ?? '';
+      const declaredTests = /^# tests (\d+)$/m.exec(stdout);
+      const declaredPasses = /^# pass (\d+)$/m.exec(stdout);
+      const hasSubtest = /^# Subtest: .+$/m.test(stdout);
+      // An empty .test.mjs file can return success as a single wrapper test;
+      // require a registered, non-skipped assertion-bearing Node subtest.
+      const testsExecuted = hasSubtest && declaredTests !== null && declaredPasses !== null
+        && Number(declaredTests[1]) > 0 && Number(declaredPasses[1]) > 0;
+      const verifierUnchanged = fs.existsSync(stagedPath)
+        && digest(fs.readFileSync(stagedPath)) === digest(verifierBytes);
+      return {
+        passed: result.status === 0 && !result.signal && !result.error && testsExecuted && verifierUnchanged,
+        tests_executed: declaredTests ? Number(declaredTests[1]) : 0,
+        tests_passed: declaredPasses ? Number(declaredPasses[1]) : 0,
+        verifier_sha256: digest(verifierBytes), verifier_unchanged: verifierUnchanged,
+        exit_code: result.status, signal: result.signal ?? null,
+        error_code: result.error?.code ?? null,
+        stdout_tail: stdout.slice(-2048), stderr_tail: (result.stderr ?? '').slice(-2048),
+      };
+    } finally {
+      try { fs.unlinkSync(stagedPath); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+    }
   };
   const baseline = executeTest();
   const receipt = {
