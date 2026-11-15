@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -68,10 +68,10 @@ test('operator repairs real code only when an independent test passes after appl
 
 test('operator preserves native failed repair evidence and original source', () => {
   const root=fixture();
-  const expected=readFileSync(path.join(root,'src/main.ts'),'utf8');
-  writeFileSync(path.join(root,'verify.test.mjs'),
-    "import test from 'node:test'; import assert from 'node:assert/strict'; test('fails',()=>assert.equal(1,2));");
   try {
+    const expected=readFileSync(path.join(root,'src/main.ts'),'utf8');
+    writeFileSync(path.join(root,'verify.test.mjs'),
+      "import test from 'node:test'; import assert from 'node:assert/strict'; test('fails',()=>assert.equal(1,2));");
     const result=run(['repair','--workspace',root,'--file','src/main.ts',
       '--code','2304','--verify-test','verify.test.mjs']);
     assert.equal(result.status,1,result.stderr);
@@ -126,6 +126,20 @@ test('npm operator launcher delegates to the actual Python tool and preserves th
   } finally {cleanup(root);}
 });
 
+test('operator refuses symlinked evaluation destinations without following them', () => {
+  const root=fixture();
+  try {
+    const original=path.join(root,'original.json');
+    const symlink=path.join(root,'linked.json');
+    writeFileSync(original,'original evidence');
+    symlinkSync(original,symlink);
+    const result=run(['evaluate','--out',symlink]);
+    assert.equal(result.status,2);
+    assert.equal(JSON.parse(result.stdout).status,'failed');
+    assert.equal(readFileSync(original,'utf8'),'original evidence');
+  } finally {cleanup(root);}
+});
+
 test('operator refuses incomplete authority, fake success, unknown operations and invalid timeouts', () => {
   for (const args of [[],['pretend'],['repair','--file','src/main.ts'],['inspect'],
     ['evaluate','--file','src/main.ts'],['evaluate','--process-timeout','2'],
@@ -142,6 +156,13 @@ test('operator refuses incomplete authority, fake success, unknown operations an
     '--verify-test','verify.test.mjs','--process-timeout','30']);
   assert.notEqual(unsafe.status,0);
   assert.match(unsafe.stderr,/unsafe for mutating repair/);
+  for (const args of [
+    ['inspect','--workspace','','--file','src/main.ts'],
+    ['evaluate','--out',''],
+  ]) {
+    const invalidArgs=run(args);
+    assert.notEqual(invalidArgs.status,0,'reject empty path');
+  }
   const invalid=run(['inspect','--workspace','/path-that-does-not-exist',
     '--file','src/main.ts']);
   assert.notEqual(invalid.status,0);
