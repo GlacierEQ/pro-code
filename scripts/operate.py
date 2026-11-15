@@ -63,6 +63,8 @@ def arguments(argv: list[str]) -> argparse.Namespace:
                 parser.error("repair requires --code positive integer and --verify-test")
             if opts.timeout_ms < 1000 or opts.timeout_ms > 120000:
                 parser.error("repair --timeout-ms must be 1000..120000")
+            if opts.occurrence < 0 or (opts.fix_index is not None and opts.fix_index < 0):
+                parser.error("repair occurrence and fix-index must be nonnegative")
     return opts
 
 
@@ -94,7 +96,10 @@ def valid_native_result(operation: str, receipt: object) -> bool:
         return (receipt.get("schema_version") == "1.0.0"
                 and receipt.get("operation") == "typescript_code_fix_inventory"
                 and receipt.get("source_modified") is False
-                and isinstance(receipt.get("diagnostics"), list))
+                and isinstance(receipt.get("diagnostics"), list)
+                and isinstance(receipt.get("diagnostic_count"), int)
+                and receipt.get("returned") == receipt["diagnostic_count"]
+                and len(receipt["diagnostics"]) == receipt["diagnostic_count"])
     if operation == "repair":
         return (receipt.get("schema_version") == "glaciereq.pro-code.verified-code-repair.v1"
                 and receipt.get("operation") == "verified_typescript_code_repair"
