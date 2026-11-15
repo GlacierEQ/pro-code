@@ -24,7 +24,7 @@ const CASES = Object.freeze([
 // Hash the scenario specification AND the executable oracles. Merely hashing
 // case labels would reuse an ID after changing the pass/fail interpretation.
 const componentHash = createHash('sha256');
-for (const source of ['./harness-eval.mjs', '../server/nexus.mjs', '../server/durable-dispatch.mjs']) {
+for (const source of ['./harness-eval.mjs', '../server/nexus.mjs', '../server/durable-dispatch.mjs', '../server/innovation.mjs']) {
   const file = fileURLToPath(new URL(source, import.meta.url));
   componentHash.update(source).update(readFileSync(file));
 }
