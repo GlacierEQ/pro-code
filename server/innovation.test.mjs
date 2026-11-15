@@ -159,6 +159,10 @@ test('measured decision gate accepts actual observed HTTP comparison but not ove
   const evidence = await evaluateHarness({ revision: 'source-pinned-test' })
   const decision = assessMeasuredHarnessEvidence(evidence)
   assert.equal(decision.decision, 'accept_local_component_evidence')
+  const mislabeled = structuredClone(evidence)
+  mislabeled.result = 'not_verified'
+  assert.equal(assessMeasuredHarnessEvidence(mislabeled).decision, 'accept_local_component_evidence',
+    'measured evidence must outrank a producer-authored success label')
   assert.equal(decision.claim_scope, 'local_fixture_http_recovery_only')
   assert.equal(decision.approval_to_deploy, false)
   assert.equal(decision.model_capability_gain_verified, false)
