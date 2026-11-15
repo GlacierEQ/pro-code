@@ -25,6 +25,12 @@ The strict command emits JSON and exits nonzero unless all durable cases pass **
 - **Oracle:** executable HTTP status and receipt checks, exact response equivalence for replay, and independent fixture invocation counts. A generated narrative cannot change a pass/fail decision.
 - **Reported metrics:** correctly handled cases / total and summed worker invocations, plus per-case response status and replay evidence.
 
+## Measured-evidence admission
+
+The existing `server/innovation.mjs` now provides `assessMeasuredHarnessEvidence(record)`. The live evaluator calls this pure admission function on its actual observations and records an `evidence_gate` object. The gate independently recalculates paired pass counts and worker invocations from the per-case records, checks identical task IDs and expected behavior, rejects missing or duplicate cases, invalid hashes, changed evaluation scope, structural regressions, infrastructure failures and inflated summaries.
+
+An accepted record reports `accept_local_component_evidence`, `approval_to_deploy: false`, and `model_capability_gain_verified: false`. This is **a schema and internal-consistency check on local execution evidence**, not cryptographic attestation that an external action happened. Native CI remains an additional requirement. The preexisting subjective `selectMaximumCoherentAdvance` scoring remains a hypothesis/prioritization tool; it cannot substitute for measured admission.
+
 ## Promotion and claims
 
 The runner makes a **specific causal durability claim** only if the recorded comparison passes. It does not establish a newly intelligent LLM, SWE-bench/Terminal-Bench performance, context-memory gains, independent human outcomes, provider side-effect exactly-once behavior, a crash-kill recovery test, a held-out benchmark, or superiority of all possible harness configurations.
@@ -37,5 +43,5 @@ Research mechanisms to consider after establishing trustworthy baselines: AHE's 
 
 1. Extend the existing durable journal with source-native reconciliation **only** when an exact authoritative worker/provider artifact can be matched to its pending claim; never complete an uncertain task using proximity or another task's manifest.
 2. Evaluate correction-aware memory, context retrieval and code-completion workflows against distinct current/stale/wrong-project fixtures and real repository tasks.
-3. Connect the existing `server/innovation.mjs` proposed-candidate scorer to versioned observed experiment records. Treat subjective forecast scores as hypotheses, not measured outcomes.
+3. Connect evidence-accepted local experiments to a held-out, model-backed task corpus and source-native execution traces before any broader harness optimization or production promotion. Keep subjective forecast scores separate from observed acceptance.
 4. After comparison on actual model-backed engineering tasks, promote verified changes with regressions, security, costs and rollback tested.
