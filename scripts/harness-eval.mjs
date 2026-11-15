@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startNexusServer } from '../server/nexus.mjs';
 import { createDispatchJournal } from '../server/durable-dispatch.mjs';
 
@@ -19,7 +20,15 @@ const CASES = Object.freeze([
   { id: 'unsupported_capability', behavior: 'unsupported work never claims success' },
   { id: 'foreign_origin', behavior: 'cross-origin browser request is rejected' },
 ]);
-const DATASET_ID = createHash('sha256').update(JSON.stringify(CASES)).digest('hex');
+// Hash the scenario specification AND the executable oracles. Merely hashing
+// case labels would reuse an ID after changing the pass/fail interpretation.
+const componentHash = createHash('sha256');
+for (const source of ['./harness-eval.mjs', '../server/nexus.mjs', '../server/durable-dispatch.mjs']) {
+  const file = fileURLToPath(new URL(source, import.meta.url));
+  componentHash.update(source).update(readFileSync(file));
+}
+const SOURCE_SHA256 = componentHash.digest('hex');
+const DATASET_ID = createHash('sha256').update(JSON.stringify(CASES)).update(SOURCE_SHA256).digest('hex');
 
 function envelope(id, capability = 'inventoryWorkspace') {
   const inventory = capability === 'inventoryWorkspace';
@@ -54,6 +63,7 @@ async function request(url, body) {
       'X-Trace-Id': body.trace_id,
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(10_000),
   });
   return { status: response.status, replay: response.headers.get('x-idempotent-replay') === 'true',
     payload: await response.json() };
@@ -67,10 +77,18 @@ async function executeCase(testCase, mode) {
   const journalDir = path.join(root, 'journal');
   const durable = mode === 'durable';
   let executions = 0;
+  let startedResolve;
+  let releaseConcurrent;
+  const firstExecutionStarted = new Promise(resolve => { startedResolve = resolve; });
+  const concurrentGate = new Promise(resolve => { releaseConcurrent = resolve; });
   const automation = {
     async executeCapability(capability) {
       assert.equal(capability, 'inventoryWorkspace');
       executions++;
+      if (testCase.id === 'concurrent_replay') {
+        startedResolve();
+        await concurrentGate;
+      }
       return {
         handled: true, operation: 'workspace_inventory', verified: true, objective_completed: true,
         summary: {
@@ -84,6 +102,7 @@ async function executeCase(testCase, mode) {
   let running;
   const launch = async () => {
     running = await startNexusServer({ host: '127.0.0.1', port: 0,
+      env: { PRO_CODE_ALLOWED_ORIGINS: '' },
       automation, journalDir: durable ? journalDir : null });
   };
   const restart = async () => {
@@ -103,7 +122,7 @@ async function executeCase(testCase, mode) {
     }
     await launch();
     if (testCase.id === 'foreign_origin') {
-      const response = await fetch(running.url + '/health', { headers: { Origin: 'https://untrusted.example' } });
+      const response = await fetch(running.url + '/health', { headers: { Origin: 'https://untrusted.example' }, signal: AbortSignal.timeout(10_000) });
       proof.status = response.status;
       proof.correct = response.status === 403 && executions === 0
         && response.headers.get('access-control-allow-origin') === null;
@@ -120,7 +139,14 @@ async function executeCase(testCase, mode) {
     } else if (testCase.id === 'concurrent_replay' || testCase.id === 'sequential_replay') {
       let first, again;
       if (testCase.id === 'concurrent_replay') {
-        [first, again] = await Promise.all([request(running.url, body), request(running.url, body)]);
+        // First executor is deliberately held while a second HTTP request is
+        // issued, so this checks more than a fast sequential cache hit.
+        const firstRequest = request(running.url, body);
+        await firstExecutionStarted;
+        const secondRequest = request(running.url, body);
+        await new Promise(resolve => setTimeout(resolve, 30));
+        releaseConcurrent();
+        [first, again] = await Promise.all([firstRequest, secondRequest]);
       } else {
         first = await request(running.url, body);
         again = await request(running.url, body);
@@ -153,7 +179,13 @@ async function executeCase(testCase, mode) {
     }
     proof.worker_executions = executions;
     return proof;
+  } catch (error) {
+    // Retain the failed case as evidence; never silently drop difficult tasks
+    // from the denominator or count an infrastructure failure as success.
+    return { ...proof, correct: false, worker_executions: executions,
+      failure: { kind: 'evaluation_infrastructure', message: String(error?.message ?? error) } };
   } finally {
+    releaseConcurrent();
     if (running) await stop(running.server);
     await rm(root, { recursive: true, force: true });
   }
@@ -170,7 +202,7 @@ export async function evaluateHarness({ revision = process.env.GITHUB_SHA ?? nul
     passed: cases.filter(x => x.correct).length,
     total: cases.length,
     correctness: Number((cases.filter(x => x.correct).length / cases.length).toFixed(6)),
-    worker_executions: cases.reduce((sum, x) => sum + x.worker_executions, 0),
+    worker_executions: cases.reduce((sum, x) => sum + (x.worker_executions ?? 0), 0),
   });
   const before = summary(baseline);
   const after = summary(candidate);
@@ -181,6 +213,7 @@ export async function evaluateHarness({ revision = process.env.GITHUB_SHA ?? nul
     evaluation_kind: 'hermetic_real_http_ablation',
     scope: 'local_fixture_only',
     dataset_sha256: DATASET_ID,
+    executable_source_sha256: SOURCE_SHA256,
     source_revision: revision,
     environment: { node: process.version, platform: process.platform },
     model: null, model_weights_changed: false,
@@ -208,6 +241,7 @@ async function cli(args) {
   }
   const result = await evaluateHarness();
   const content = JSON.stringify(result, null, 2) + '\n';
+  process.stdout.write(content);
   if (outIndex !== -1) {
     const destination = path.resolve(args[outIndex + 1]);
     await mkdir(path.dirname(destination), { recursive: true });
@@ -219,7 +253,6 @@ async function cli(args) {
       await rm(temporary, { force: true }).catch(() => {});
     }
   }
-  process.stdout.write(content);
   if (strict && result.result !== 'local_ablation_improvement_verified') process.exitCode = 1;
 }
 
