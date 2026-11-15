@@ -37,6 +37,10 @@ def arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--process-timeout", type=int, default=None, help="Read-only inspect/evaluate process timeout in seconds (30..900); not available for mutating repairs")
     opts = parser.parse_args(argv)
     supplied = {item for item in argv if item.startswith('--')}
+    if "--workspace" in supplied and (opts.workspace is None or not opts.workspace.strip()):
+        parser.error("--workspace must be a nonempty path")
+    if "--out" in supplied and (opts.out is None or not opts.out.strip()):
+        parser.error("--out must be a nonempty explicit file path")
     if opts.process_timeout is not None and (opts.process_timeout < 30 or opts.process_timeout > 900):
         parser.error("--process-timeout must be 30..900 seconds")
     if opts.operation == "repair" and opts.process_timeout is not None:
@@ -69,7 +73,7 @@ def command_for(opts: argparse.Namespace, node: str) -> list[str]:
             command += ["--out", str(Path(opts.out).expanduser().resolve())]
         return command
 
-    workspace = str(Path(opts.workspace or ".").expanduser().resolve(strict=True))
+    workspace = str(Path(opts.workspace if opts.workspace is not None else ".").expanduser().resolve(strict=True))
     if not Path(workspace).is_dir():
         raise ValueError("workspace must be an existing directory")
     command = [node, str(REPO / "scripts/code-fix.mjs"),
@@ -87,11 +91,13 @@ def valid_native_result(operation: str, receipt: object) -> bool:
     if not isinstance(receipt, dict):
         return False
     if operation == "inspect":
-        return (receipt.get("operation") == "typescript_code_fix_inventory"
+        return (receipt.get("schema_version") == "1.0.0"
+                and receipt.get("operation") == "typescript_code_fix_inventory"
                 and receipt.get("source_modified") is False
                 and isinstance(receipt.get("diagnostics"), list))
     if operation == "repair":
-        return (receipt.get("operation") == "verified_typescript_code_repair"
+        return (receipt.get("schema_version") == "glaciereq.pro-code.verified-code-repair.v1"
+                and receipt.get("operation") == "verified_typescript_code_repair"
                 and receipt.get("outcome") == "verified_code_repair"
                 and receipt.get("source_modified") is True
                 and isinstance(receipt.get("verification"), dict)
@@ -99,7 +105,8 @@ def valid_native_result(operation: str, receipt: object) -> bool:
                 and receipt["verification"].get("new_project_diagnostic_count") == 0
                 and receipt["verification"].get("all_write_hashes_match") is True)
     gate = receipt.get("evidence_gate")
-    return (receipt.get("evaluation_kind") == "hermetic_real_http_ablation"
+    return (receipt.get("schema_version") == "glaciereq.pro-code.harness-eval.v1"
+            and receipt.get("evaluation_kind") == "hermetic_real_http_ablation"
             and receipt.get("result") == "local_ablation_improvement_verified"
             and isinstance(gate, dict)
             and gate.get("decision") == "accept_local_component_evidence"
@@ -119,7 +126,10 @@ def main(argv: list[str] | None = None) -> int:
         # A user-selected evaluator output is write-once per path. The
         # exclusive sibling lock rejects concurrent or stale overwrites.
         if opts.operation == "evaluate" and opts.out:
-            dest = Path(opts.out).expanduser().resolve()
+            requested = Path(opts.out).expanduser()
+            if requested.is_symlink():
+                raise ValueError("evaluation evidence path must not be a symlink")
+            dest = requested.resolve()
             dest.parent.mkdir(parents=True, exist_ok=True)
             output_lock = Path(str(dest) + ".bridge.lock")
             lock_fd = os.open(output_lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
