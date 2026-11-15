@@ -48,6 +48,11 @@ test('Nexus HTTP dispatch survives restart with exact original receipt and no se
     assert.equal(again.headers.get('x-idempotent-replay'),'true');
     assert.deepEqual(await again.json(),receipt);
     assert.equal(executions,1,'restart replay must never rerun the action');
+    const receiptListing = await fetch(runtime.url + '/api/v1/runtime/receipts');
+    assert.equal(receiptListing.status, 200);
+    assert.equal((await receiptListing.json()).receipts.length, 1,
+      'a persisted replay must be observable in the runtime receipt listing');
+    
     const conflict=await dispatch(runtime.url,{...body,params:{unexpected:'new'}});
     assert.equal(conflict.status,409);
     assert.equal(executions,1);
