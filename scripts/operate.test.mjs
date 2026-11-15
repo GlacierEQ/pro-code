@@ -95,9 +95,28 @@ test('operator evaluates real loopback dispatch and admits only measured local e
   assert.equal(report.model,null);
 });
 
+test('operator writes source-bound evidence once without stale-run overwrite', () => {
+  const root=fixture();
+  const destination=path.join(root,'evaluation.json');
+  try {
+    const first=run(['evaluate','--out',destination]);
+    assert.equal(first.status,0,first.stderr);
+    const original=readFileSync(destination,'utf8');
+    assert.equal(JSON.parse(original).result,'local_ablation_improvement_verified');
+    const second=run(['evaluate','--out',destination]);
+    assert.equal(second.status,2);
+    assert.equal(JSON.parse(second.stdout).status,'failed');
+    assert.equal(readFileSync(destination,'utf8'),original);
+    assert.equal(path.join(root,'evaluation.json.bridge.lock') in {},
+      false);
+  } finally {cleanup(root);}
+});
+
 test('operator refuses incomplete authority, fake success, unknown operations and invalid timeouts', () => {
   for (const args of [[],['pretend'],['repair','--file','src/main.ts'],['inspect'],
-    ['evaluate','--file','src/main.ts'],['evaluate','--process-timeout','2']]) {
+    ['evaluate','--file','src/main.ts'],['evaluate','--process-timeout','2'],
+    ['inspect','--file','src/main.ts','--occurrence','2'],
+    ['inspect','--file','src/main.ts','--timeout-ms','1000']]) {
     const result=run(args);
     assert.notEqual(result.status,0,'must reject '+args.join(' '));
     assert.doesNotMatch(result.stdout,/Runtime observed ok/);
