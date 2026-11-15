@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { inspectCodeFixes, planCodeFix, applyCodeFix } from './code-fix.mjs';
+import { inspectCodeFixes, planCodeFix, applyCodeFix, executeVerifiedCodeRepair } from './code-fix.mjs';
 
 function fixture(files) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pro-code-fix-'));
@@ -117,4 +117,115 @@ test('CLI can list, preview and apply compiler fixes with machine-readable JSON'
     const bad = spawnSync(process.execPath, [...base, '--code', '2304', '--apply'], { encoding: 'utf8' });
     assert.notEqual(bad.status, 0);
   } finally { clean(root); }
+});
+
+
+function createVerifier(root, body) {
+  fs.writeFileSync(path.join(root, 'verify.test.mjs'), body);
+  return 'verify.test.mjs';
+}
+
+test('repair executes real failing-then-passing independent acceptance test and validates actual source', () => {
+  const root=fixture({'util.ts':'export function rocketLaunch() { return 42; }\n',
+    'main.ts':'const n = rocketLaunch();\n'});
+  const verifyTest=createVerifier(root, `
+    import test from 'node:test';
+    import assert from 'node:assert/strict';
+    import { readFileSync } from 'node:fs';
+    test('code repair supplies missing auto-import', () => {
+      const source=readFileSync(new URL('./src/main.ts',import.meta.url),'utf8');
+      assert.match(source,/import\s*\{\s*rocketLaunch\s*\}\s*from/);
+    });
+  `);
+  try {
+    const result=executeVerifiedCodeRepair({root,file:'src/main.ts',code:2304,verifyTest});
+    assert.equal(result.operation,'verified_typescript_code_repair');
+    assert.equal(result.baseline.passed,false);
+    assert.equal(result.verification.passed,true);
+    assert.equal(result.verification.compiler_diagnostic_after,0);
+    assert.equal(result.verification.all_write_hashes_match,true);
+    assert.equal(result.outcome,'verified_code_repair');
+    assert.equal(result.source_modified,true);
+    assert.match(result.plan_sha256,/^[0-9a-f]{64}$/);
+    assert.match(read(root,'main.ts'),/import.*rocketLaunch.*from/);
+  } finally {clean(root);}
+});
+
+test('failed independent acceptance test restores exact original bytes', () => {
+  const root=fixture({'util.ts':'export function rocketLaunch() { return 42; }\n',
+    'main.ts':'const n = rocketLaunch();\n'});
+  const original=read(root,'main.ts');
+  const verifyTest=createVerifier(root, `
+    import test from 'node:test';
+    import assert from 'node:assert/strict';
+    test('intentionally failing external regression',()=>assert.equal(1,2));
+  `);
+  try {
+    const result=executeVerifiedCodeRepair({root,file:'src/main.ts',code:2304,verifyTest});
+    assert.equal(result.baseline.passed,false);
+    assert.equal(result.verification.passed,false);
+    assert.equal(result.outcome,'verification_failed_restored');
+    assert.equal(result.rollback.verified,true);
+    assert.equal(result.source_modified,false);
+    assert.equal(read(root,'main.ts'),original);
+  } finally {clean(root);}
+});
+
+test('failed verifier modifying code is not overwritten by automatic rollback', () => {
+  const root=fixture({'util.ts':'export function rocketLaunch() { return 42; }\n',
+    'main.ts':'const n = rocketLaunch();\n'});
+  const verifyTest=createVerifier(root, `
+    import test from 'node:test';
+    import assert from 'node:assert/strict';
+    import { readFileSync,appendFileSync } from 'node:fs';
+    test('simulate independently modified source',()=>{
+      const file=new URL('./src/main.ts',import.meta.url);
+      if(readFileSync(file,'utf8').includes('import')) appendFileSync(file,'// independent change\n');
+      assert.fail('verification deliberately fails');
+    });
+  `);
+  try {
+    const result=executeVerifiedCodeRepair({root,file:'src/main.ts',code:2304,verifyTest});
+    assert.equal(result.outcome,'blocked_external_write_or_rollback_failure');
+    assert.equal(result.rollback.verified,false);
+    assert.match(result.rollback.error,/independent write/);
+    assert.equal(result.source_modified,true);
+    assert.match(read(root,'main.ts'),/independent change/);
+  } finally {clean(root);}
+});
+
+test('rejects out-of-workspace and symlink verification and invalid timeout', () => {
+  const root=fixture({'util.ts':'export function rocketLaunch() { return 42; }\n',
+    'main.ts':'rocketLaunch();\n'});
+  const outside=fs.mkdtempSync(path.join(os.tmpdir(),'pro-code-verifier-outside-'));
+  try {
+    fs.writeFileSync(path.join(outside,'outside.test.mjs'),"import test from 'node:test'; test('x',()=>{})");
+    fs.symlinkSync(path.join(outside,'outside.test.mjs'),path.join(root,'verify.test.mjs'));
+    assert.throws(()=>executeVerifiedCodeRepair({root,file:'src/main.ts',code:2304,verifyTest:'verify.test.mjs'}),/non-symlink/);
+    assert.throws(()=>executeVerifiedCodeRepair({root,file:'src/main.ts',code:2304,verifyTest:path.join(outside,'outside.test.mjs')}),/escapes workspace/);
+    assert.throws(()=>executeVerifiedCodeRepair({root,file:'src/main.ts',code:2304,verifyTest:'verify.test.mjs',timeoutMs:0}),/timeout/);
+  } finally {clean(root);clean(outside);}
+});
+
+test('CLI repair uses real source and test and requires explicit verifier', () => {
+  const root=fixture({'util.ts':'export function rocketLaunch() { return 42; }\n',
+    'main.ts':'const n = rocketLaunch();\n'});
+  const verifyTest=createVerifier(root, `
+    import test from 'node:test';
+    import assert from 'node:assert/strict';
+    import { readFileSync } from 'node:fs';
+    test('import present',()=>assert.match(readFileSync(new URL('./src/main.ts',import.meta.url),'utf8'),/import/));
+  `);
+  const cli=fileURLToPath(new URL('./code-fix.mjs',import.meta.url));
+  try {
+    const base=[cli,'--root',root,'--file','src/main.ts','--code','2304'];
+    const invalid=spawnSync(process.execPath,[...base,'--repair'],{encoding:'utf8'});
+    assert.notEqual(invalid.status,0);
+    assert.match(invalid.stderr,/requires --code and --verify-test/);
+    const output=execFileSync(process.execPath,[...base,'--repair','--verify-test',verifyTest],{encoding:'utf8',timeout:60_000});
+    const result=JSON.parse(output);
+    assert.equal(result.outcome,'verified_code_repair');
+    assert.equal(result.verification.passed,true);
+    assert.match(read(root,'main.ts'),/import/);
+  } finally {clean(root);}
 });
