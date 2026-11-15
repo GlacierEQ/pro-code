@@ -69,3 +69,11 @@ test('two completion attempts cannot overwrite the first durable receipt', async
     assert.ok(['receipt-1', 'receipt-2'].includes(replay.payload.receipt.receipt_id));
   });
 });
+
+test('world-accessible journal directory is rejected before a claim is admitted', async () => {
+  await withJournal(async (journal, root) => {
+    const { chmod } = await import('node:fs/promises');
+    await chmod(root, 0o755);
+    await assert.rejects(journal.reserve('private', digest), /private real directory/);
+  });
+});
