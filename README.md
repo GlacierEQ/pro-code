@@ -26,6 +26,8 @@ npm run code:knowledge -- --symbol workersManager --definition-file src/workers.
 # Refactoring requires a real identifier position; see the read-only preview below.
 ```
 
+**Measured harness recovery:** `npm run eval:harness` runs a seven-case live HTTP comparison of bare Nexus against durable dispatch under identical fixture operations. See [harness evaluation methodology](docs/HARNESS_EVALUATION.md). These are local durability measurements, not coding-benchmark or model-weight gains.
+
 Core source routes: [package.json](package.json) · [Node runtime](server/nexus.mjs) · [code intelligence](scripts/code-intelligence.mjs) · [completion](scripts/code-completion.mjs) · [refactoring](scripts/code-refactor.mjs) · [architecture](ARCHITECTURE.md) · [CI](https://github.com/GlacierEQ/pro-code/actions).
 
 **What is implemented:** compiler-backed coding CLI scripts, a bounded local Nexus runtime and workspace inventory, a React/TypeScript interface, and native tests in Node, Python, Rust and Haskell. **What is not implied:** a connected remote AI, live execution of every advertised worker role, production deployment or automatic cross-repository inheritance. The runtime explicitly distinguishes declared capabilities from supported handlers.
