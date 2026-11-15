@@ -345,3 +345,24 @@ test('supervised verifier timeout kills POSIX test process group and leaves sour
     assert.ok(Date.now()-started < 9_000,'supervised verifier timeout must return promptly');
   } finally {clean(root);}
 });
+
+
+test('full repair lifecycle lock rejects competing operations without modifying their source', () => {
+  const root=fixture({'util.ts':'export function rocketLaunch() { return 42; }\n',
+    'main.ts':'const n = rocketLaunch();\n'});
+  const before=read(root,'main.ts');
+  const verifier=path.join(root,'verify.test.mjs');
+  fs.writeFileSync(verifier,"import test from 'node:test'; test('exists',()=>{});");
+  try {
+    const control=path.join(root,'.pro-code');
+    fs.mkdirSync(control,{recursive:true});
+    fs.writeFileSync(path.join(control,'verified-repair.lock'),'another active verified repair');
+    assert.throws(
+      () => executeVerifiedCodeRepair({root,file:'src/main.ts',code:2304,verifyTest:'verify.test.mjs'}),
+      /EEXIST/,
+    );
+    assert.equal(read(root,'main.ts'),before);
+    assert.equal(fs.readFileSync(path.join(control,'verified-repair.lock'),'utf8'),
+      'another active verified repair');
+  } finally {clean(root);}
+});
