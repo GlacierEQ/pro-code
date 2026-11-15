@@ -20,8 +20,8 @@ test('completed request replays after a new journal instance without executing a
     assert.deepEqual(await createDispatchJournal(root).reserve('key', digest), { state: 'replay', payload });
     assert.deepEqual(await journal.reserve('key', 'b'.repeat(64)), { state: 'conflict' });
     const records = await readdir(root);
-    assert.equal(records.length, 1);
-    assert.equal(JSON.parse(await readFile(path.join(root, records[0]), 'utf8')).status, 'completed');
+    assert.equal(records.length, 2);
+    assert.equal(JSON.parse(await readFile(path.join(root, records.find(name => name.endsWith('.done'))), 'utf8')).status, 'completed');
   });
 });
 
@@ -51,5 +51,21 @@ test('invalid or corrupt journal records fail closed rather than executing', asy
     const { writeFile } = await import('node:fs/promises');
     await writeFile(path.join(root, files[0]), '{bad-json');
     assert.deepEqual(await journal.reserve('corrupt', digest), { state: 'in_doubt' });
+  });
+});
+
+test('two completion attempts cannot overwrite the first durable receipt', async () => {
+  await withJournal(async (journal, root) => {
+    await journal.reserve('write-once', digest);
+    const different = { status: 'succeeded', success: true, receipt: { receipt_id: 'receipt-2' } };
+    const results = await Promise.allSettled([
+      journal.complete('write-once', digest, payload),
+      createDispatchJournal(root).complete('write-once', digest, different),
+    ]);
+    assert.equal(results.filter(x => x.status === 'fulfilled').length, 1);
+    assert.equal(results.filter(x => x.status === 'rejected').length, 1);
+    const replay = await journal.reserve('write-once', digest);
+    assert.equal(replay.state, 'replay');
+    assert.ok(['receipt-1', 'receipt-2'].includes(replay.payload.receipt.receipt_id));
   });
 });
