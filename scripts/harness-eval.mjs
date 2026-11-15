@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startNexusServer } from '../server/nexus.mjs';
 import { createDispatchJournal } from '../server/durable-dispatch.mjs';
+import { assessMeasuredHarnessEvidence } from '../server/innovation.mjs';
 
 // Real local HTTP execution. "Bare" and "durable" use the SAME Nexus source,
 // operation fixture, request envelope and runtime; only journalDir differs.
@@ -208,7 +209,7 @@ export async function evaluateHarness({ revision = process.env.GITHUB_SHA ?? nul
   const after = summary(candidate);
   const verified = after.passed === CASES.length && after.passed > before.passed
     && candidate.every(x => x.correct === true);
-  return {
+  const record = {
     schema_version: 'glaciereq.pro-code.harness-eval.v1',
     evaluation_kind: 'hermetic_real_http_ablation',
     scope: 'local_fixture_only',
@@ -231,6 +232,11 @@ export async function evaluateHarness({ revision = process.env.GITHUB_SHA ?? nul
       'No production deployment, overall agent improvement, or cross-provider exactly-once guarantee implied',
     ],
   };
+  record.evidence_gate = assessMeasuredHarnessEvidence(record);
+  if (record.evidence_gate.decision !== 'accept_local_component_evidence') {
+    record.result = 'not_verified';
+  }
+  return record;
 }
 
 async function cli(args) {
@@ -253,7 +259,8 @@ async function cli(args) {
       await rm(temporary, { force: true }).catch(() => {});
     }
   }
-  if (strict && result.result !== 'local_ablation_improvement_verified') process.exitCode = 1;
+  if (strict && (result.result !== 'local_ablation_improvement_verified'
+      || result.evidence_gate.decision !== 'accept_local_component_evidence')) process.exitCode = 1;
 }
 
 const invokedPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : null;
