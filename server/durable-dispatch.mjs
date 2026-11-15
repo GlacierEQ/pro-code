@@ -25,8 +25,8 @@ export function createDispatchJournal(directory) {
         catch (error) { if (error.code !== 'EEXIST') throw error; }
         await syncDirectory(current);
         const info = await lstat(next);
-        if (next === root && (!info.isDirectory() || info.isSymbolicLink())) {
-          throw new Error('dispatch journal must be a real directory');
+        if (next === root && (!info.isDirectory() || info.isSymbolicLink() || (info.mode & 0o077) !== 0)) {
+          throw new Error('dispatch journal must be a private real directory');
         }
         current = next;
       }
