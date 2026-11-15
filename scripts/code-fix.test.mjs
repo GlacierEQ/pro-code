@@ -277,3 +277,45 @@ test('baseline acceptance script changing source blocks repair without overwriti
     assert.doesNotMatch(read(root,'main.ts'),/import.*rocketLaunch/);
   } finally {clean(root);}
 });
+
+
+test('no registered Node test cannot certify repaired code', () => {
+  const root=fixture({'util.ts':'export function rocketLaunch() { return 42; }\n',
+    'main.ts':'const n = rocketLaunch();\n'});
+  const original=read(root,'main.ts');
+  const verifyTest=createVerifier(root,'// empty acceptance suite - no node:test assertion');
+  try {
+    const result=executeVerifiedCodeRepair({root,file:'src/main.ts',code:2304,verifyTest});
+    assert.equal(result.baseline.passed,false);
+    assert.equal(result.outcome,'verification_failed_restored');
+    assert.equal(result.verification.passed,false);
+    assert.equal(result.rollback.verified,true);
+    assert.equal(read(root,'main.ts'),original);
+  } finally {clean(root);}
+});
+
+test('verifier introducing unrelated compiler error cannot certify repair or hide external change', () => {
+  const root=fixture({'util.ts':'export function rocketLaunch() { return 42; }\n',
+    'main.ts':'const n: number = rocketLaunch();\n'});
+  const original=read(root,'main.ts');
+  const verifyTest=createVerifier(root,[
+    "import test from 'node:test';",
+    "import { readFileSync, writeFileSync } from 'node:fs';",
+    "test('independent dependency mutation',()=>{",
+    "const main=readFileSync(new URL('./src/main.ts',import.meta.url),'utf8');",
+    "if (main.includes('import')) writeFileSync(new URL('./src/util.ts',import.meta.url),",
+    "'export function rocketLaunch() { return \"incorrect\"; }');",
+    "});",
+  ].join('\n'));
+  try {
+    const result=executeVerifiedCodeRepair({root,file:'src/main.ts',code:2304,verifyTest});
+    assert.equal(result.verification.passed,true,'the supplied acceptance script itself passes');
+    assert.equal(result.outcome,'verification_failed_restored_with_external_changes');
+    assert.equal(result.rollback.verified,true);
+    assert.equal(result.source_modified,true,'unplanned dependency write must be acknowledged');
+    assert.ok(result.verification.new_project_diagnostic_count>0);
+    assert.deepEqual(result.unplanned_project_files,['src/util.ts']);
+    assert.equal(read(root,'main.ts'),original,'only our own source edit is restored');
+    assert.match(read(root,'util.ts'),/incorrect/,'do not clobber a verifier write');
+  } finally {clean(root);}
+});
