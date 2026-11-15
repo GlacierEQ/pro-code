@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   assertInnovationOutcome,
+  assessMeasuredHarnessEvidence,
   selectMaximumCoherentAdvance,
   validateInnovationPolicy,
 } from './innovation.mjs'
@@ -151,4 +152,38 @@ test('innovation cycle cannot disappear into a report-only no-op', () => {
   assert.equal(assertInnovationOutcome({ state: 'implemented' }), true)
   assert.throws(() => assertInnovationOutcome({ state: 'reported' }), /real state change/)
   assert.throws(() => assertInnovationOutcome({ state: 'hold_with_reason', reason: 'no' }), /measured reason/)
+})
+
+test('measured decision gate accepts actual observed HTTP comparison but not overall deployment', async () => {
+  const { evaluateHarness } = await import('../scripts/harness-eval.mjs')
+  const evidence = await evaluateHarness({ revision: 'source-pinned-test' })
+  const decision = assessMeasuredHarnessEvidence(evidence)
+  assert.equal(decision.decision, 'accept_local_component_evidence')
+  assert.equal(decision.claim_scope, 'local_fixture_http_recovery_only')
+  assert.equal(decision.approval_to_deploy, false)
+  assert.equal(decision.model_capability_gain_verified, false)
+  assert.equal(decision.independent_native_ci_required, true)
+  assert.equal(decision.observed.baseline_passed, 4)
+  assert.equal(decision.observed.candidate_passed, 7)
+  assert.equal(decision.observed.total, 7)
+  assert.deepEqual([...decision.observed.improved_cases].sort(),
+    ['restart_conflict', 'restart_replay', 'uncertain_claim'].sort())
+
+  const mutate = edit => {
+    const clone = structuredClone(evidence)
+    edit(clone)
+    const result = assessMeasuredHarnessEvidence(clone)
+    assert.equal(result.decision, 'hold')
+    assert.ok(result.blockers.length)
+    return result
+  }
+  assert.ok(mutate(x => { x.dataset_sha256 = '' }).blockers.includes('unversioned_executable_or_dataset'))
+  assert.ok(mutate(x => { x.executable_source_sha256 = '' }).blockers.includes('unversioned_executable_or_dataset'))
+  assert.ok(mutate(x => { x.model = 'some-LLM' }).blockers.includes('model_or_training_claim_out_of_scope'))
+  assert.ok(mutate(x => { x.scope = 'production' }).blockers.includes('unsupported_evaluation_contract'))
+  assert.ok(mutate(x => { x.compared.baseline.passed = 7 }).blockers.includes('reported_metrics_conflict_with_observations'))
+  assert.ok(mutate(x => { x.cases.candidate.pop() }).blockers.includes('unpaired_or_mismatched_tasks'))
+  assert.ok(mutate(x => { x.cases.baseline[1].case_id = x.cases.baseline[0].case_id }).blockers.includes('incomplete_or_duplicate_observations'))
+  assert.ok(mutate(x => { x.cases.candidate[0].correct = false }).blockers.includes('verified_baseline_regression'))
+  assert.ok(mutate(x => { x.cases.candidate[2].failure = { kind: 'evaluation_infrastructure' } }).blockers.includes('infrastructure_failure_present'))
 })
