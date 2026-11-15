@@ -257,3 +257,23 @@ test('API requires an explicit real verifier path before attempting any source m
     assert.equal(read(root,'main.ts'),'const n = rocketLaunch();\n');
   } finally {clean(root);}
 });
+
+
+test('baseline acceptance script changing source blocks repair without overwriting writer', () => {
+  const root=fixture({'util.ts':'export function rocketLaunch() { return 42; }\n',
+    'main.ts':'const n = rocketLaunch();\n'});
+  const verifyTest=createVerifier(root,[
+    "import test from 'node:test';",
+    "import { appendFileSync } from 'node:fs';",
+    "test('writes independently',()=>appendFileSync(new URL('./src/main.ts',import.meta.url),'// external baseline edit'));",
+  ].join('\n'));
+  try {
+    const result=executeVerifiedCodeRepair({root,file:'src/main.ts',code:2304,verifyTest});
+    assert.equal(result.outcome,'baseline_verifier_modified_source');
+    assert.equal(result.source_modified,true);
+    assert.equal(result.baseline.passed,true);
+    assert.equal(result.verification,null);
+    assert.match(read(root,'main.ts'),/external baseline edit/);
+    assert.doesNotMatch(read(root,'main.ts'),/import.*rocketLaunch/);
+  } finally {clean(root);}
+});
