@@ -9,6 +9,8 @@ export function createDispatchJournal(directory) {
   if (typeof directory !== 'string' || !directory.trim()) throw new TypeError('journal directory is required');
   const root = path.resolve(directory);
   const filename = key => path.join(root, createHash('sha256').update(key).digest('hex') + '.json');
+  const validReceipt = payload => payload && typeof payload.success === 'boolean' && payload.receipt
+    && typeof payload.receipt.receipt_id === 'string' && payload.receipt.receipt_id.trim() !== '';
   let prepared;
   async function syncDirectory(dir) {
     const handle = await open(dir, 'r');
@@ -39,7 +41,7 @@ export function createDispatchJournal(directory) {
       const record = JSON.parse(await handle.readFile('utf8'));
       if (!record || record.schema_version !== 1 || !['pending', 'completed'].includes(record.status)
           || typeof record.envelope_digest !== 'string' || record.envelope_digest.length !== 64
-          || (record.status === 'completed' && (!record.payload || typeof record.payload.success !== 'boolean'))) {
+          || (record.status === 'completed' && !validReceipt(record.payload))) {
         throw new Error('Invalid persisted dispatch journal entry');
       }
       return record;
@@ -52,14 +54,20 @@ export function createDispatchJournal(directory) {
     await prepare();
     const file = filename(key);
     let handle;
+    let created = false;
     try {
       handle = await open(file, 'wx', 0o600);
+      created = true;
       await handle.writeFile(JSON.stringify({ schema_version: 1, status: 'pending', envelope_digest: envelopeDigest }) + '\n');
       await handle.sync();
       await syncDirectory(root);
       return { state: 'reserved' };
     } catch (error) {
-      if (error.code !== 'EEXIST') throw error;
+      if (error.code !== 'EEXIST') {
+        if (handle) { await handle.close().catch(() => {}); handle = null; }
+        if (created) await unlink(file).catch(() => {});
+        throw error;
+      }
     } finally { if (handle) await handle.close(); }
     // Another process may still be writing its exclusive claim. Never retry
     // the execution when the record is incomplete or corrupt.
@@ -68,6 +76,7 @@ export function createDispatchJournal(directory) {
     if (record.envelope_digest !== envelopeDigest) return { state: 'conflict' };
     const completed = await readRecord(file + '.done').catch(() => null);
     if (completed && completed.status === 'completed' && completed.envelope_digest === envelopeDigest) {
+      await syncDirectory(root);
       return { state: 'replay', payload: completed.payload };
     }
     return { state: 'in_doubt' };
@@ -78,7 +87,7 @@ export function createDispatchJournal(directory) {
     if (current.envelope_digest !== envelopeDigest || current.status !== 'pending') {
       throw new Error('Dispatch journal claim changed before completion');
     }
-    if (!payload || typeof payload.success !== 'boolean' || !payload.receipt) {
+    if (!validReceipt(payload)) {
       throw new TypeError('dispatch completion requires a result and receipt');
     }
     const temporary = file + '.' + process.pid + '.' + randomUUID() + '.tmp';
@@ -100,5 +109,22 @@ export function createDispatchJournal(directory) {
       throw error;
     }
   }
-  return { reserve, complete };
+  async function checkReady() {
+    await prepare();
+    const info = await lstat(root);
+    if (!info.isDirectory() || info.isSymbolicLink() || (info.mode & 0o077) !== 0) {
+      throw new Error('dispatch journal is not a private real directory');
+    }
+    const probe = path.join(root, '.ready-' + randomUUID());
+    const handle = await open(probe, 'wx', 0o600);
+    try {
+      await handle.writeFile('ready');
+      await handle.sync();
+    } finally {
+      await handle.close();
+      await unlink(probe).catch(() => {});
+    }
+    return true;
+  }
+  return { reserve, complete, checkReady };
 }
