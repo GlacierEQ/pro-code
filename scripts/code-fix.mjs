@@ -51,7 +51,7 @@ function diagnosticRecord(source, d) {
 }
 
 /** Discover current compiler diagnostics and genuinely available fixes without modifying files. */
-export function inspectCodeFixes({ root = process.cwd(), config = 'tsconfig.json', file, limit = 50 } = {}) {
+function inspectCodeFixesUnlocked({ root = process.cwd(), config = 'tsconfig.json', file, limit = 50 } = {}) {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('limit must be 1..100');
   const workspace = fs.realpathSync(path.resolve(root));
   const target = secureFile(workspace, file);
@@ -474,8 +474,8 @@ function executeVerifiedCodeRepairUnlocked({
  * This prevents a competing verified repair from mistaking another operation's
  * after-digest for its own and undoing a successful user change.
  */
-export function executeVerifiedCodeRepair(options = {}) {
-  const workspace = fs.realpathSync(path.resolve(options.root ?? process.cwd()));
+function withVerifiedRepairLock(root, callback) {
+  const workspace = fs.realpathSync(path.resolve(root));
   const control = path.join(workspace, '.pro-code');
   fs.mkdirSync(control, { recursive: true, mode: 0o700 });
   const info = fs.lstatSync(control);
@@ -484,11 +484,23 @@ export function executeVerifiedCodeRepair(options = {}) {
   }
   const lock = path.join(control, 'verified-repair.lock');
   const handle = fs.openSync(lock, 'wx', 0o600);
-  try {
-    return executeVerifiedCodeRepairUnlocked({ ...options, root: workspace });
-  } finally {
+  try { return callback(workspace); }
+  finally {
     try { fs.closeSync(handle); } finally { fs.unlinkSync(lock); }
   }
+}
+
+/** Inspection and verified repair use the same admission boundary, so
+ * diagnostics cannot be collected from a half-applied cooperating repair.
+ */
+export function inspectCodeFixes(options = {}) {
+  return withVerifiedRepairLock(options.root ?? process.cwd(), workspace =>
+    inspectCodeFixesUnlocked({ ...options, root: workspace }));
+}
+
+export function executeVerifiedCodeRepair(options = {}) {
+  return withVerifiedRepairLock(options.root ?? process.cwd(), workspace =>
+    executeVerifiedCodeRepairUnlocked({ ...options, root: workspace }));
 }
 
 function argsFromCli(args) {
