@@ -38,6 +38,9 @@ jobs:
       - name: Execute Vitest suite
         run: npm test -- --reporter=verbose
 
+      - name: Evaluate live harness recovery ablation
+        run: npm run eval:harness
+
       - name: Build production bundle
         run: npm run build
 
