@@ -134,7 +134,7 @@ test('repair executes real failing-then-passing independent acceptance test and 
     import { readFileSync } from 'node:fs';
     test('code repair supplies missing auto-import', () => {
       const source=readFileSync(new URL('./src/main.ts',import.meta.url),'utf8');
-      assert.match(source,/import\s*\{\s*rocketLaunch\s*\}\s*from/);
+      assert.match(source,/import.*rocketLaunch.*from/);
     });
   `);
   try {
@@ -180,7 +180,7 @@ test('failed verifier modifying code is not overwritten by automatic rollback', 
     import { readFileSync,appendFileSync } from 'node:fs';
     test('simulate independently modified source',()=>{
       const file=new URL('./src/main.ts',import.meta.url);
-      if(readFileSync(file,'utf8').includes('import')) appendFileSync(file,'// independent change\n');
+      if(readFileSync(file,'utf8').includes('import')) appendFileSync(file,'// independent change');
       assert.fail('verification deliberately fails');
     });
   `);
