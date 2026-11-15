@@ -216,8 +216,9 @@ export function executeVerifiedCodeRepair({
 } = {}) {
   if (!Number.isSafeInteger(code) || code <= 0 || !Number.isSafeInteger(occurrence) || occurrence < 0
     || (fixIndex !== null && (!Number.isSafeInteger(fixIndex) || fixIndex < 0))
-    || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 120_000) {
-    throw new TypeError('repair requires a positive diagnostic, valid fix index and 1000..120000 ms timeout');
+    || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 120_000
+    || typeof verifyTest !== 'string' || !verifyTest.trim()) {
+    throw new TypeError('repair requires a positive diagnostic, valid fix index, 1000..120000 ms timeout, and a verifyTest path');
   }
   const workspace = fs.realpathSync(path.resolve(root));
   const verifier = secureFile(workspace, verifyTest);
@@ -266,7 +267,7 @@ export function executeVerifiedCodeRepair({
   const receipt = {
     schema_version: 'glaciereq.pro-code.verified-code-repair.v1',
     operation: 'verified_typescript_code_repair',
-    workspace, target: plan.file, diagnostic: code,
+    target: plan.file, diagnostic: code,
     selected_action: plan.description, selected_fix_index: plan.fix_index,
     plan_sha256: plan.plan_sha256,
     source_before: originals.map(x => ({ path: x.relative, sha256: x.before })),
@@ -287,7 +288,47 @@ export function executeVerifiedCodeRepair({
     receipt.outcome = 'baseline_verifier_unavailable';
     return receipt;
   }
-  applyCodeFix(plan, { beforeWrite });
+  try {
+    applyCodeFix(plan, { beforeWrite });
+  } catch (error) {
+    // commitGuardedFiles already makes a best-effort rollback on any caught
+    // failure. Independently read the current bytes before making a claim.
+    receipt.application_error = error instanceof Error ? error.message : String(error);
+    try {
+      const current = originals.map(item => ({
+        ...item, content: fs.readFileSync(secureFile(workspace, item.relative), 'utf8'),
+      }));
+      const states = current.map(item => digest(item.content));
+      if (states.every((state, index) => state === originals[index].before)) {
+        receipt.outcome = 'application_failed_unchanged';
+        receipt.rollback = { attempted: false, verified: true, error: null };
+        receipt.source_modified = false;
+        return receipt;
+      }
+      if (states.some((state, index) => state !== originals[index].before && state !== originals[index].after)) {
+        throw new Error('unrecognized source mutation after failed apply; preserved');
+      }
+      const changed = current.filter((item, index) => states[index] === item.after);
+      const restored = commitGuardedFiles({
+        root: workspace,
+        files: changed.map(item => ({
+          relative: item.relative, original: item.content,
+          content: item.original, expectedAfter: item.before,
+        })),
+      });
+      const exact = restored.verified && originals.every(item =>
+        digest(fs.readFileSync(secureFile(workspace, item.relative), 'utf8')) === item.before);
+      receipt.rollback = { attempted: true, verified: exact, error: null };
+      receipt.source_modified = !exact;
+      receipt.outcome = exact ? 'application_failed_restored' : 'restoration_not_verified';
+    } catch (restoreError) {
+      receipt.outcome = 'blocked_partial_or_external_write';
+      receipt.source_modified = true;
+      receipt.rollback = { attempted: true, verified: false,
+        error: restoreError instanceof Error ? restoreError.message : String(restoreError) };
+    }
+    return receipt;
+  }
   let postError = null;
   try {
     const test = executeTest();
