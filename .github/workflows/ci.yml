@@ -39,7 +39,16 @@ jobs:
         run: npm test -- --reporter=verbose
 
       - name: Evaluate live harness recovery ablation
-        run: npm run eval:harness
+        run: npm run eval:harness -- --out .pro-code/runtime/harness-evaluation.json
+
+      - name: Preserve source-bound evaluation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: harness-evidence-${{ github.sha }}
+          path: .pro-code/runtime/harness-evaluation.json
+          if-no-files-found: warn
+          retention-days: 90
 
       - name: Build production bundle
         run: npm run build
