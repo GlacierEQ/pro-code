@@ -299,7 +299,9 @@ export function executeVerifiedCodeRepair({
       const stdout = result.stdout ?? '';
       const declaredTests = /^# tests (\d+)$/m.exec(stdout);
       const declaredPasses = /^# pass (\d+)$/m.exec(stdout);
-      const hasSubtest = /^# Subtest: .+$/m.test(stdout);
+      const subtests = [...stdout.matchAll(/^# Subtest: (.+)$/gm)].map(match => match[1].trim());
+      const hasSubtest = subtests.some(name => name !== stagedPath
+        && name !== path.basename(stagedPath));
       // An empty .test.mjs file can return success as a single wrapper test;
       // require a registered, non-skipped assertion-bearing Node subtest.
       const testsExecuted = hasSubtest && declaredTests !== null && declaredPasses !== null
