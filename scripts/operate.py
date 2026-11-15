@@ -33,10 +33,12 @@ def arguments(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--verify-test", help="Trusted existing Node test file inside the target workspace")
     parser.add_argument("--timeout-ms", type=int, default=30000, help="Verifier timeout in milliseconds (1000..120000)")
     parser.add_argument("--out", help="Explicit JSON output filename for evaluate only")
-    parser.add_argument("--process-timeout", type=int, default=300, help="Total local command timeout in seconds (30..900)")
+    parser.add_argument("--process-timeout", type=int, default=None, help="Read-only inspect/evaluate process timeout in seconds (30..900); not available for mutating repairs")
     opts = parser.parse_args(argv)
-    if opts.process_timeout < 30 or opts.process_timeout > 900:
+    if opts.process_timeout is not None and (opts.process_timeout < 30 or opts.process_timeout > 900):
         parser.error("--process-timeout must be 30..900 seconds")
+    if opts.operation == "repair" and opts.process_timeout is not None:
+        parser.error("--process-timeout is unsafe for mutating repair; use native --timeout-ms for the verifier")
     if opts.operation == "evaluate":
         if any((opts.workspace, opts.file, opts.code is not None, opts.verify_test,
                 opts.fix_index is not None, opts.occurrence != 0, opts.config != "tsconfig.json",
@@ -110,8 +112,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     try:
         cmd = command_for(opts, node)
+        # Never impose a second hard deadline on mutating repair: killing its
+        # process could interrupt source restoration between verification and
+        # rollback. The owning Node engine bounds each verifier and closes its
+        # own transaction; read-only inspect/evaluate retain an outer deadline.
+        outer_timeout = None if opts.operation == "repair" else (opts.process_timeout or 300)
         result = subprocess.run(cmd, cwd=REPO, shell=False, text=True,
-                                capture_output=True, timeout=opts.process_timeout, check=False)
+                                capture_output=True, timeout=outer_timeout, check=False)
     except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
         kind = "command_timeout" if isinstance(exc, subprocess.TimeoutExpired) else "command_unavailable"
         print(json.dumps(error_record(kind, str(exc))))
