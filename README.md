@@ -130,11 +130,13 @@ npm run code:fix -- --file src/main.ts --code 2304 --fix-index 0
 # compiler diagnostic comparison, rollback on catchable failure, and readback.
 npm run code:fix -- --file src/main.ts --code 2304 --fix-index 0 --apply
 
-# Run an independently verified repair, using the first eligible compiler fix.
-# The verifier must be an existing regular Node test file within the workspace.
-# This executes the test before and after, requires it to pass after the repair,
-# and safely restores exact original bytes when post-repair verification fails.
-npm run code:fix -- --file src/main.ts --code 2304 --repair --verify-test test/repair-acceptance.test.mjs
+# Run the executable end-to-end demo. The tests create real temporary
+# TypeScript projects, introduce TS2304, repair and independently verify them.
+npm run test:code-fix
+
+# For an actual project with a verified compiler diagnostic and existing Node
+# test file, supply that project's own file, code and verifier paths:
+# npm run code:fix -- --file "$TARGET" --code "$DIAGNOSTIC" --repair --verify-test "$VERIFIER"
 
 # Exercise the compiler, CLI and adversarial failure paths
 npm run test:code-fix
