@@ -94,6 +94,8 @@ async function executeCase(testCase, mode) {
   const body = envelope(testCase.id);
   const proof = { case_id: testCase.id, expected: testCase.behavior, mode };
   try {
+    // Seed both variants identically. reserve() creates the fixture directory;
+    // the bare Nexus deliberately ignores that durable state (control arm).
     if (testCase.id === 'uncertain_claim') {
       const digest = createHash('sha256').update(JSON.stringify(body)).digest('hex');
       const claim = await createDispatchJournal(journalDir).reserve(body.idempotency_key, digest);
