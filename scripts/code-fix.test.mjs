@@ -339,7 +339,7 @@ test('supervised verifier timeout kills POSIX test process group and leaves sour
     assert.equal(result.outcome,'baseline_verifier_unavailable');
     assert.equal(result.baseline.passed,false);
     assert.equal(result.baseline.error_code,'ETIMEDOUT');
-    if(process.platform!=='win32') assert.equal(result.baseline.process_group_killed,true);
+    if(process.platform!=='win32') assert.equal(result.baseline.group_termination_signaled,true);
     assert.equal(result.source_modified,false);
     assert.equal(read(root,'main.ts'),before);
     assert.ok(Date.now()-started < 9_000,'supervised verifier timeout must return promptly');
