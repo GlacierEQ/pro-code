@@ -94,7 +94,7 @@ test('does not overwrite source on blocked transaction lock', () => {
   const root = fixture({ 'util.ts': 'export function rocketLaunch() { return 42; }\n', 'main.ts': 'rocketLaunch();\n' });
   try {
     const plan = firstFix(root);
-    fs.mkdirSync(path.join(root, '.pro-code'));
+    fs.mkdirSync(path.join(root, '.pro-code'), { recursive: true });
     fs.writeFileSync(path.join(root, '.pro-code', 'semantic-refactor.lock'), 'already held');
     assert.throws(() => applyCodeFix(plan), /EEXIST/);
     assert.equal(read(root, 'main.ts'), 'rocketLaunch();\n');
