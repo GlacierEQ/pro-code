@@ -305,9 +305,12 @@ export function createNexusHandler({ env = process.env, now = () => new Date(), 
     const url = new URL(request.url ?? '/', 'http://localhost');
     try {
       if (request.method === 'GET' && url.pathname === '/health') {
+        let journalReady = !journal;
+        try { if (journal) journalReady = await journal.checkReady(); } catch { journalReady = false; }
         const workers = Object.keys(WORKER_CAPABILITIES);
-        sendJson(response, 200, {
-          status: 'ok', service: 'pro-code-local-nexus', version: '1.2.0', workers,
+        sendJson(response, journalReady ? 200 : 503, {
+          status: journalReady ? 'ok' : 'degraded', service: 'pro-code-local-nexus', version: '1.2.0', workers,
+          journal: { enabled: !!journal, ready: journalReady },
           supported_capabilities: automation ? Object.keys(EXECUTABLE_OPERATIONS) : [],
           runtime: { status: 'ok', workers }, automation: automation?.getStatus() ?? null,
           checkedAt: now().toISOString(),
@@ -409,10 +412,8 @@ export function createNexusHandler({ env = process.env, now = () => new Date(), 
           // replay twice. The bound applies to completed receipts only.
           if (!record.inFlight) idempotency.delete(oldKey);
         }
-        if (!persistedReplay) {
-          receipts.unshift(payload.receipt);
-          if (receipts.length > MAX_RECEIPTS) receipts.length = MAX_RECEIPTS;
-        }
+        receipts.unshift(payload.receipt);
+        if (receipts.length > MAX_RECEIPTS) receipts.length = MAX_RECEIPTS;
         sendJson(response, payload.success ? 200 : 501, payload,
           persistedReplay ? { 'X-Idempotent-Replay': 'true' } : {});
         return;
