@@ -24,6 +24,9 @@ test('actual local HTTP ablation measures a reproducible durability gain with no
   assert.equal(result.compared.baseline.worker_executions, 7);
   assert.equal(result.compared.candidate.worker_executions, 4);
   assert.equal(result.result, 'local_ablation_improvement_verified');
+  assert.equal(result.evidence_gate.decision, 'accept_local_component_evidence');
+  assert.equal(result.evidence_gate.approval_to_deploy, false);
+  assert.equal(result.evidence_gate.model_capability_gain_verified, false);
   const byId = entries => new Map(entries.map(entry => [entry.case_id, entry]));
   const bare = byId(result.cases.baseline);
   const durable = byId(result.cases.candidate);
