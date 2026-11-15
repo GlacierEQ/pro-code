@@ -366,3 +366,22 @@ test('full repair lifecycle lock rejects competing operations without modifying 
       'another active verified repair');
   } finally {clean(root);}
 });
+
+
+test('compiler inventory cannot inspect a workspace during an active verified repair', () => {
+  const root=fixture({'util.ts':'export function rocketLaunch() { return 42; }\n',
+    'main.ts':'const n = rocketLaunch();\n'});
+  const original=read(root,'main.ts');
+  try {
+    const control=path.join(root,'.pro-code');
+    fs.mkdirSync(control,{recursive:true});
+    fs.writeFileSync(path.join(control,'verified-repair.lock'),'active repair');
+    assert.throws(()=>inspectCodeFixes({root,file:'src/main.ts'}),/EEXIST/);
+    assert.equal(read(root,'main.ts'),original);
+    assert.equal(fs.readFileSync(path.join(control,'verified-repair.lock'),'utf8'),'active repair');
+    fs.unlinkSync(path.join(control,'verified-repair.lock'));
+    const result=inspectCodeFixes({root,file:'src/main.ts'});
+    assert.equal(result.source_modified,false);
+    assert.equal(fs.existsSync(path.join(control,'verified-repair.lock')),false);
+  } finally {clean(root);}
+});
