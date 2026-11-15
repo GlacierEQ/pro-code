@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import path from 'node:path';
 
 // Helper invoked as a separate process by code-fix.mjs. It supervises one
 // explicitly supplied Node test file and kills its POSIX process group on
@@ -53,6 +54,7 @@ if (!testFile || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000 || timeou
     killTree();
     child.stdout.destroy();
     child.stderr.destroy();
+    child.unref();
     finish(null, 'forced-timeout');
   }, timeoutMs + 3_000);
   function finish(code, signal) {
@@ -60,8 +62,16 @@ if (!testFile || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000 || timeou
     reported = true;
     clearTimeout(timeout);
     clearTimeout(hardLimit);
+    const matchTests = /^# tests (\d+)$/m.exec(stdout);
+    const matchPassed = /^# pass (\d+)$/m.exec(stdout);
+    const registered = [...stdout.matchAll(/^# Subtest: (.+)$/gm)]
+      .map(match => match[1].trim())
+      .filter(name => name !== testFile && name !== path.basename(testFile));
     process.stdout.write(JSON.stringify({
       exit_code: code, signal, timed_out: timedOut, output_overflow: outputOverflow,
+      tests_executed: matchTests ? Number(matchTests[1]) : 0,
+      tests_passed: matchPassed ? Number(matchPassed[1]) : 0,
+      registered_subtests: registered.length,
       process_group_killed: timedOut || outputOverflow ? useGroup : false,
       spawn_error: spawnError, stdout_tail: stdout.slice(-2048), stderr_tail: stderr.slice(-2048),
     }) + '\n');
