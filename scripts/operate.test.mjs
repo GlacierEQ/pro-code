@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -107,8 +107,7 @@ test('operator writes source-bound evidence once without stale-run overwrite', (
     assert.equal(second.status,2);
     assert.equal(JSON.parse(second.stdout).status,'failed');
     assert.equal(readFileSync(destination,'utf8'),original);
-    assert.equal(path.join(root,'evaluation.json.bridge.lock') in {},
-      false);
+    assert.equal(existsSync(destination+'.bridge.lock'),false);
   } finally {cleanup(root);}
 });
 
