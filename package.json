@@ -13,7 +13,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "test": "npm run test:runtime && npm run test:code-intelligence && npm run test:code-completion && npm run test:code-knowledge && npm run test:code-refactor && npm run test:code-fix && npm run test:harness-evaluation && vitest run --exclude server/nexus.test.mjs --exclude server/automation.test.mjs --exclude server/automatic-runtime.test.mjs --exclude server/innovation.test.mjs --exclude server/durable-dispatch.test.mjs --exclude server/durable-dispatch.integration.test.mjs --exclude scripts/code-intelligence.test.mjs --exclude scripts/code-completion.test.mjs --exclude scripts/code-knowledge.test.mjs --exclude scripts/code-refactor.test.mjs --exclude scripts/refactor-transaction.test.mjs --exclude scripts/code-fix.test.mjs --exclude scripts/harness-eval.test.mjs",
+    "test": "npm run test:runtime && npm run test:code-intelligence && npm run test:code-completion && npm run test:code-knowledge && npm run test:code-refactor && npm run test:code-fix && npm run test:harness-evaluation && npm run test:operator && vitest run --exclude server/nexus.test.mjs --exclude server/automation.test.mjs --exclude server/automatic-runtime.test.mjs --exclude server/innovation.test.mjs --exclude server/durable-dispatch.test.mjs --exclude server/durable-dispatch.integration.test.mjs --exclude scripts/code-intelligence.test.mjs --exclude scripts/code-completion.test.mjs --exclude scripts/code-knowledge.test.mjs --exclude scripts/code-refactor.test.mjs --exclude scripts/refactor-transaction.test.mjs --exclude scripts/code-fix.test.mjs --exclude scripts/harness-eval.test.mjs --exclude scripts/operate.test.mjs",
     "test:runtime": "node --test server/nexus.test.mjs server/automation.test.mjs server/automatic-runtime.test.mjs server/innovation.test.mjs server/durable-dispatch.test.mjs server/durable-dispatch.integration.test.mjs",
     "workers": "ls -la $HOME/.kiro/workers",
     "code:inspect": "node scripts/code-intelligence.mjs",
@@ -27,7 +27,9 @@
     "code:fix": "node scripts/code-fix.mjs",
     "test:code-fix": "node --test scripts/code-fix.test.mjs",
     "eval:harness": "node scripts/harness-eval.mjs --strict",
-    "test:harness-evaluation": "node --test scripts/harness-eval.test.mjs"
+    "test:harness-evaluation": "node --test scripts/harness-eval.test.mjs",
+    "operator": "node scripts/operator-launch.mjs",
+    "test:operator": "node --test scripts/operate.test.mjs"
   },
   "dependencies": {
     "react": "^19.2.6",

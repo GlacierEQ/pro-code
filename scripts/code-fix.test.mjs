@@ -94,7 +94,7 @@ test('does not overwrite source on blocked transaction lock', () => {
   const root = fixture({ 'util.ts': 'export function rocketLaunch() { return 42; }\n', 'main.ts': 'rocketLaunch();\n' });
   try {
     const plan = firstFix(root);
-    fs.mkdirSync(path.join(root, '.pro-code'));
+    fs.mkdirSync(path.join(root, '.pro-code'), { recursive: true });
     fs.writeFileSync(path.join(root, '.pro-code', 'semantic-refactor.lock'), 'already held');
     assert.throws(() => applyCodeFix(plan), /EEXIST/);
     assert.equal(read(root, 'main.ts'), 'rocketLaunch();\n');
@@ -343,5 +343,45 @@ test('supervised verifier timeout kills POSIX test process group and leaves sour
     assert.equal(result.source_modified,false);
     assert.equal(read(root,'main.ts'),before);
     assert.ok(Date.now()-started < 9_000,'supervised verifier timeout must return promptly');
+  } finally {clean(root);}
+});
+
+
+test('full repair lifecycle lock rejects competing operations without modifying their source', () => {
+  const root=fixture({'util.ts':'export function rocketLaunch() { return 42; }\n',
+    'main.ts':'const n = rocketLaunch();\n'});
+  const before=read(root,'main.ts');
+  const verifier=path.join(root,'verify.test.mjs');
+  fs.writeFileSync(verifier,"import test from 'node:test'; test('exists',()=>{});");
+  try {
+    const control=path.join(root,'.pro-code');
+    fs.mkdirSync(control,{recursive:true});
+    fs.writeFileSync(path.join(control,'verified-repair.lock'),'another active verified repair');
+    assert.throws(
+      () => executeVerifiedCodeRepair({root,file:'src/main.ts',code:2304,verifyTest:'verify.test.mjs'}),
+      /EEXIST/,
+    );
+    assert.equal(read(root,'main.ts'),before);
+    assert.equal(fs.readFileSync(path.join(control,'verified-repair.lock'),'utf8'),
+      'another active verified repair');
+  } finally {clean(root);}
+});
+
+
+test('compiler inventory cannot inspect a workspace during an active verified repair', () => {
+  const root=fixture({'util.ts':'export function rocketLaunch() { return 42; }\n',
+    'main.ts':'const n = rocketLaunch();\n'});
+  const original=read(root,'main.ts');
+  try {
+    const control=path.join(root,'.pro-code');
+    fs.mkdirSync(control,{recursive:true});
+    fs.writeFileSync(path.join(control,'verified-repair.lock'),'active repair');
+    assert.throws(()=>inspectCodeFixes({root,file:'src/main.ts'}),/EEXIST/);
+    assert.equal(read(root,'main.ts'),original);
+    assert.equal(fs.readFileSync(path.join(control,'verified-repair.lock'),'utf8'),'active repair');
+    fs.unlinkSync(path.join(control,'verified-repair.lock'));
+    const result=inspectCodeFixes({root,file:'src/main.ts'});
+    assert.equal(result.source_modified,false);
+    assert.equal(fs.existsSync(path.join(control,'verified-repair.lock')),false);
   } finally {clean(root);}
 });

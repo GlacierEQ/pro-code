@@ -51,7 +51,7 @@ function diagnosticRecord(source, d) {
 }
 
 /** Discover current compiler diagnostics and genuinely available fixes without modifying files. */
-export function inspectCodeFixes({ root = process.cwd(), config = 'tsconfig.json', file, limit = 50 } = {}) {
+function inspectCodeFixesUnlocked({ root = process.cwd(), config = 'tsconfig.json', file, limit = 50 } = {}) {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('limit must be 1..100');
   const workspace = fs.realpathSync(path.resolve(root));
   const target = secureFile(workspace, file);
@@ -210,7 +210,7 @@ export function applyCodeFix(plan, { beforeWrite } = {}) {
  * Failed verification attempts restore exact original bytes, but do not
  * overwrite a file another writer has modified since our applied digest.
  */
-export function executeVerifiedCodeRepair({
+function executeVerifiedCodeRepairUnlocked({
   root = process.cwd(), config = 'tsconfig.json', file, code, occurrence = 0,
   fixIndex = null, verifyTest, timeoutMs = 30_000, beforeWrite,
 } = {}) {
@@ -468,6 +468,39 @@ export function executeVerifiedCodeRepair({
     receipt.outcome = 'blocked_external_write_or_rollback_failure';
   }
   return receipt;
+}
+
+/** Serialize the entire repair lifecycle, not just its atomic source write.
+ * This prevents a competing verified repair from mistaking another operation's
+ * after-digest for its own and undoing a successful user change.
+ */
+function withVerifiedRepairLock(root, callback) {
+  const workspace = fs.realpathSync(path.resolve(root));
+  const control = path.join(workspace, '.pro-code');
+  fs.mkdirSync(control, { recursive: true, mode: 0o700 });
+  const info = fs.lstatSync(control);
+  if (info.isSymbolicLink() || !info.isDirectory()) {
+    throw new Error('repair control path must be a real directory');
+  }
+  const lock = path.join(control, 'verified-repair.lock');
+  const handle = fs.openSync(lock, 'wx', 0o600);
+  try { return callback(workspace); }
+  finally {
+    try { fs.closeSync(handle); } finally { fs.unlinkSync(lock); }
+  }
+}
+
+/** Inspection and verified repair use the same admission boundary, so
+ * diagnostics cannot be collected from a half-applied cooperating repair.
+ */
+export function inspectCodeFixes(options = {}) {
+  return withVerifiedRepairLock(options.root ?? process.cwd(), workspace =>
+    inspectCodeFixesUnlocked({ ...options, root: workspace }));
+}
+
+export function executeVerifiedCodeRepair(options = {}) {
+  return withVerifiedRepairLock(options.root ?? process.cwd(), workspace =>
+    executeVerifiedCodeRepairUnlocked({ ...options, root: workspace }));
 }
 
 function argsFromCli(args) {

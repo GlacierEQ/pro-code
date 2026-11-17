@@ -1,5 +1,7 @@
 # Multi-stage production image: the build must pass the real application checks.
 FROM node:22-alpine AS build
+# Operator integration tests invoke scripts/operate.py; Python is build-only.
+RUN apk add --no-cache python3
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
